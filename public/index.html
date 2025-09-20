@@ -511,8 +511,8 @@
     validTrendlines.forEach((trendline, index) => {
       try {
         const trendlineSeries = chart.addLineSeries({
-          color: trendline.color || '#f59e0b',
-          lineWidth: trendline.selected ? 3 : 2, // Thicker when selected
+          color: trendline.selected ? '#22d3ee' : (trendline.color || '#f59e0b'),
+          lineWidth: trendline.selected ? 5 : 2, // Much thicker when selected
           lineStyle: 0
         });
         
@@ -557,8 +557,8 @@
     symbolLevels.forEach((level, index) => {
       const priceLine = {
         price: level.price,
-        color: level.color || '#60a5fa',
-        lineWidth: level.selected ? 3 : 2, // Thicker when selected
+        color: level.selected ? '#22d3ee' : (level.color || '#60a5fa'),
+        lineWidth: level.selected ? 5 : 2, // Much thicker when selected
         lineStyle: 0, // solid line, thicker
         axisLabelVisible: true,
         title: `Level ${level.price.toFixed(2)}`
@@ -659,7 +659,11 @@
   
   function disableTrendlinePreview() {
     if (previewTrendline) {
-      chart.removeSeries(previewTrendline);
+      try {
+        chart.removeSeries(previewTrendline);
+      } catch (error) {
+        console.log('[EOD] Preview series already removed or invalid');
+      }
       previewTrendline = null;
     }
   }
@@ -757,6 +761,7 @@
     }
     showLineControls(lineInfo);
     updateLineHandles();
+    log(`✅ SELECTED ${lineInfo.type.toUpperCase()}: Click color buttons to change, X to delete, or drag handles to resize`);
   }
 
   function deselectLine() {
@@ -771,17 +776,35 @@
     isLineSelected = false;
     hideLineControls();
     clearLineHandles();
+    log('❌ Line deselected');
   }
 
   function showLineControls(lineInfo) {
     const panel = document.getElementById('line-controls');
     panel.style.display = 'block';
+    panel.style.background = 'rgba(0, 0, 0, 0.9)';
+    panel.style.border = '2px solid #22d3ee';
+    panel.style.boxShadow = '0 4px 12px rgba(34, 211, 238, 0.5)';
+    
     const curr = (lineInfo.data.color || (lineInfo.type==='trendline' ? '#f59e0b' : '#60a5fa'));
     document.querySelectorAll('.color-option').forEach(o => o.classList.toggle('active', o.dataset.color === curr));
+    
+    // Add selection title
+    let title = panel.querySelector('.selection-title');
+    if (!title) {
+      title = document.createElement('div');
+      title.className = 'selection-title';
+      title.style.cssText = 'color: #22d3ee; font-weight: bold; margin-bottom: 8px; text-align: center; font-size: 14px;';
+      panel.insertBefore(title, panel.firstChild);
+    }
+    title.textContent = `🎯 ${lineInfo.type.toUpperCase()} SELECTED`;
   }
   
   function hideLineControls() { 
-    document.getElementById('line-controls').style.display='none'; 
+    const panel = document.getElementById('line-controls');
+    panel.style.display='none';
+    panel.style.border = '1px solid #374151';
+    panel.style.boxShadow = 'none';
   }
   
   function deleteSelectedLine() {
@@ -791,30 +814,112 @@
     deselectLine();
   }
 
-  // Simple handles for trendlines
+  // Draggable handles for trendlines
   function updateLineHandles() {
     clearLineHandles();
     if (!selectedLine || selectedLine.type!=='trendline') return;
     const { startTime, startPrice, endTime, endPrice } = selectedLine.data;
     const p = document.getElementById('chart');
-    const mk = (x,y)=>{ 
-      const d=document.createElement('div'); 
-      d.className='line-handle'; 
-      d.style.cssText='position:absolute;width:10px;height:10px;border:2px solid #fff;border-radius:50%;background:'+ (selectedLine.data.color||'#f59e0b')+';transform:translate(-50%,-50%);pointer-events:none;'; 
-      d.style.left=x+'px'; 
-      d.style.top=y+'px'; 
-      p.appendChild(d); 
-      lineHandles.push(d); 
+    
+    const createHandle = (x, y, isStart) => { 
+      if (x === null || y === null) return;
+      const handle = document.createElement('div'); 
+      handle.className = 'line-handle';
+      handle.style.cssText = `
+        position: absolute;
+        width: 12px;
+        height: 12px;
+        border: 3px solid #22d3ee;
+        border-radius: 50%;
+        background: ${selectedLine.data.color || '#f59e0b'};
+        transform: translate(-50%, -50%);
+        cursor: grab;
+        z-index: 1000;
+        box-shadow: 0 2px 8px rgba(34, 211, 238, 0.6);
+        pointer-events: auto;
+      `;
+      handle.style.left = x + 'px';
+      handle.style.top = y + 'px';
+      
+      // Add drag functionality
+      let isDragging = false;
+      handle.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        handle.style.cursor = 'grabbing';
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      
+      document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const rect = p.getBoundingClientRect();
+        const newX = e.clientX - rect.left;
+        const newY = e.clientY - rect.top;
+        
+        handle.style.left = newX + 'px';
+        handle.style.top = newY + 'px';
+        
+        // Update trendline data
+        const newTime = chart.timeScale().coordinateToTime(newX);
+        const newPrice = candleSeries.coordinateToPrice(newY);
+        
+        if (newTime && newPrice && !isNaN(newTime) && !isNaN(newPrice)) {
+          // Update the trendline data in storage
+          const trendlines = getTrendlinesForSymbol(currentSymbol);
+          const trendlineIndex = trendlines.findIndex(t => t.id === selectedLine.data.id);
+          if (trendlineIndex >= 0) {
+            if (isStart) {
+              trendlines[trendlineIndex].startTime = newTime;
+              trendlines[trendlineIndex].startPrice = newPrice;
+              selectedLine.data.startTime = newTime;
+              selectedLine.data.startPrice = newPrice;
+            } else {
+              trendlines[trendlineIndex].endTime = newTime;
+              trendlines[trendlineIndex].endPrice = newPrice;
+              selectedLine.data.endTime = newTime;
+              selectedLine.data.endPrice = newPrice;
+            }
+            saveTrendlines();
+            drawTrendlinesOnChart();
+            // Redraw handles at new position
+            setTimeout(() => updateLineHandles(), 10);
+          }
+        }
+      });
+      
+      document.addEventListener('mouseup', () => {
+        if (isDragging) {
+          isDragging = false;
+          handle.style.cursor = 'grab';
+          log('✅ Trendline resized - new position saved');
+        }
+      });
+      
+      p.appendChild(handle); 
+      lineHandles.push(handle); 
     };
-    const sx=chart.timeScale().timeToCoordinate(startTime), sy=candleSeries.priceToCoordinate(startPrice);
-    const ex=chart.timeScale().timeToCoordinate(endTime), ey=candleSeries.priceToCoordinate(endPrice);
-    if (sx!=null&&sy!=null) mk(sx,sy); 
-    if (ex!=null&&ey!=null) mk(ex,ey);
+    
+    const sx = chart.timeScale().timeToCoordinate(startTime);
+    const sy = candleSeries.priceToCoordinate(startPrice);
+    const ex = chart.timeScale().timeToCoordinate(endTime);
+    const ey = candleSeries.priceToCoordinate(endPrice);
+    
+    createHandle(sx, sy, true);  // Start handle
+    createHandle(ex, ey, false); // End handle
   }
   
   function clearLineHandles() { 
     lineHandles.forEach(h=>h.remove()); 
     lineHandles=[]; 
+  }
+  
+  // Track chart viewport changes to keep handles synchronized
+  function setupHandleTracking() {
+    chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+      if (selectedLine && selectedLine.type === 'trendline') {
+        updateLineHandles();
+      }
+    });
   }
 
   // ---- Event Listeners
@@ -934,6 +1039,7 @@
   updateLevelsDisplay();
   updateTrendlinesDisplay();
   setupChartInteraction();
+  setupHandleTracking();
   loadSymbol(currentSymbol);
 
   // health check with status indicator
