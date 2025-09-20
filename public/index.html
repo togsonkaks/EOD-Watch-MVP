@@ -98,15 +98,16 @@
         <span>EMA(200)</span>
       </div>
       <div class="indicator-toggle">
-        <div class="toggle-switch" id="atr-toggle">
+        <div class="toggle-switch" id="bb-toggle">
           <div class="toggle-knob"></div>
         </div>
-        <span>ATR(14)</span>
+        <span>BB(20,2)</span>
       </div>
     </div>
     <div id="drawing-tools">
       <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">DRAWING</h4>
       <button class="tool-btn" id="level-tool">Level</button>
+      <button class="tool-btn" id="trendline-tool">Trendline</button>
       <button class="tool-btn" id="clear-all">Clear</button>
     </div>
     <div id="levels">
@@ -145,10 +146,14 @@
   // ---- Application State
   let watchlist = JSON.parse(localStorage.getItem('eod-watchlist') || '["AAPL", "META", "TSLA", "GOOGL", "MSFT"]');
   let currentSymbol = localStorage.getItem('eod-current-symbol') || 'AAPL';
-  let indicators = JSON.parse(localStorage.getItem('eod-indicators') || '{"ema200": true, "atr14": false}');
+  let indicators = JSON.parse(localStorage.getItem('eod-indicators') || '{"ema200": true, "bb20": false}');
   let levels = JSON.parse(localStorage.getItem('eod-levels') || '{}'); // symbol -> levels mapping
+  let trendlines = JSON.parse(localStorage.getItem('eod-trendlines') || '{}'); // symbol -> trendlines mapping
   let drawingMode = false;
+  let drawingTool = 'level'; // 'level' or 'trendline'
+  let trendlineStart = null; // for 2-point trendline drawing
   let currentLevels = []; // active level lines on chart
+  let currentTrendlines = []; // active trendlines on chart
 
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
@@ -161,19 +166,9 @@
   const candleSeries = chart.addCandlestickSeries();
   // indicators
   const emaSeries = chart.addLineSeries({ color: '#60a5fa', lineWidth: 2 });
-  const atrSeries = chart.addLineSeries({ 
-    color: '#f59e0b', 
-    lineWidth: 1,
-    priceScaleId: 'left'
-  });
-  
-  // Enable left price scale for ATR
-  chart.applyOptions({
-    leftPriceScale: {
-      visible: true,
-      borderColor: '#334155'
-    }
-  });
+  const bbUpperSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
+  const bbMiddleSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1, lineStyle: 2 });
+  const bbLowerSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
 
   // ---- Indicator calculations
   function ema(values, period) {
@@ -188,23 +183,34 @@
     return out;
   }
 
-  function atr(values, period) {
-    if (values.length < period + 1) return [];
-    const trs = [];
-    for (let i = 1; i < values.length; i++) {
-      const high = values[i].high;
-      const low = values[i].low;
-      const prevClose = values[i-1].close;
-      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-      trs.push(tr);
+  function bollingerBands(values, period, stdDev) {
+    if (!values || values.length < period) return { upper: [], middle: [], lower: [] };
+    
+    const upper = [], middle = [], lower = [];
+    
+    for (let i = period - 1; i < values.length; i++) {
+      // Calculate SMA for middle band
+      const slice = values.slice(i - period + 1, i + 1);
+      
+      // Ensure all values are valid numbers
+      const validSlice = slice.filter(bar => bar && typeof bar.close === 'number' && !isNaN(bar.close));
+      if (validSlice.length !== slice.length) continue; // Skip if any invalid data
+      
+      const sma = validSlice.reduce((sum, bar) => sum + bar.close, 0) / validSlice.length;
+      
+      // Calculate standard deviation
+      const variance = validSlice.reduce((sum, bar) => sum + Math.pow(bar.close - sma, 2), 0) / validSlice.length;
+      const std = Math.sqrt(variance);
+      
+      const time = values[i].time;
+      if (time && !isNaN(sma) && !isNaN(std)) {
+        middle.push({ time, value: sma });
+        upper.push({ time, value: sma + (stdDev * std) });
+        lower.push({ time, value: sma - (stdDev * std) });
+      }
     }
-    // Simple moving average of TR
-    const out = [];
-    for (let i = period - 1; i < trs.length; i++) {
-      const sum = trs.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
-      out.push({ time: values[i + 1].time, value: sum / period });
-    }
-    return out;
+    
+    return { upper, middle, lower };
   }
 
   async function fetchBars(symbol, days = 600) {
@@ -243,11 +249,15 @@
         emaSeries.setData([]);
       }
       
-      if (indicators.atr14) {
-        const atr14 = atr(bars, 14);
-        atrSeries.setData(atr14);
+      if (indicators.bb20) {
+        const bb = bollingerBands(bars, 20, 2);
+        bbUpperSeries.setData(bb.upper);
+        bbMiddleSeries.setData(bb.middle);
+        bbLowerSeries.setData(bb.lower);
       } else {
-        atrSeries.setData([]);
+        bbUpperSeries.setData([]);
+        bbMiddleSeries.setData([]);
+        bbLowerSeries.setData([]);
       }
       
       chart.timeScale().fitContent();
@@ -257,6 +267,8 @@
       updateWatchlistDisplay();
       updateLevelsDisplay();
       drawLevelsOnChart();
+      updateTrendlinesDisplay();
+      drawTrendlinesOnChart();
       
       // Update status to connected
       $('#status-dot').className = 'status-dot status-connected';
@@ -327,7 +339,7 @@
 
   function updateIndicatorToggles() {
     $('#ema-toggle').className = indicators.ema200 ? 'toggle-switch active' : 'toggle-switch';
-    $('#atr-toggle').className = indicators.atr14 ? 'toggle-switch active' : 'toggle-switch';
+    $('#bb-toggle').className = indicators.bb20 ? 'toggle-switch active' : 'toggle-switch';
   }
 
   function saveIndicators() {
@@ -336,6 +348,50 @@
 
   function saveLevels() {
     localStorage.setItem('eod-levels', JSON.stringify(levels));
+  }
+
+  function saveTrendlines() {
+    localStorage.setItem('eod-trendlines', JSON.stringify(trendlines));
+  }
+
+  function getTrendlinesForSymbol(symbol) {
+    return trendlines[symbol] || [];
+  }
+
+  function addTrendline(startTime, startPrice, endTime, endPrice) {
+    if (!trendlines[currentSymbol]) trendlines[currentSymbol] = [];
+    const trendlineId = Date.now().toString();
+    const trendline = {
+      id: trendlineId,
+      startTime: startTime,
+      startPrice: startPrice,
+      endTime: endTime,
+      endPrice: endPrice,
+      symbol: currentSymbol
+    };
+    trendlines[currentSymbol].push(trendline);
+    saveTrendlines();
+    updateTrendlinesDisplay();
+    drawTrendlinesOnChart();
+    return trendline;
+  }
+
+  function removeTrendline(trendlineId) {
+    if (trendlines[currentSymbol]) {
+      trendlines[currentSymbol] = trendlines[currentSymbol].filter(t => t.id !== trendlineId);
+      saveTrendlines();
+      updateTrendlinesDisplay();
+      drawTrendlinesOnChart();
+    }
+  }
+
+  function clearAllTrendlines() {
+    if (trendlines[currentSymbol]) {
+      trendlines[currentSymbol] = [];
+      saveTrendlines();
+      updateTrendlinesDisplay();
+      drawTrendlinesOnChart();
+    }
   }
 
   function getLevelsForSymbol(symbol) {
@@ -403,6 +459,64 @@
     });
   }
 
+  function updateTrendlinesDisplay() {
+    // For now, we'll display trendlines in the levels list
+    // A future enhancement could be a separate trendlines panel
+  }
+
+  function drawTrendlinesOnChart() {
+    // Clear existing trendlines
+    currentTrendlines.forEach(line => chart.removeSeries(line));
+    currentTrendlines = [];
+    
+    // Draw current symbol's trendlines
+    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol);
+    
+    // Sanitize and validate trendlines before drawing
+    const validTrendlines = symbolTrendlines.filter(t => 
+      t && 
+      t.startTime != null && 
+      t.endTime != null && 
+      Number.isFinite(t.startPrice) && 
+      Number.isFinite(t.endPrice)
+    );
+    
+    validTrendlines.forEach(trendline => {
+      try {
+        const trendlineSeries = chart.addLineSeries({
+          color: '#f59e0b',
+          lineWidth: 2,
+          lineStyle: 0
+        });
+        
+        // Create line data with validated start and end points
+        const lineData = [
+          { time: trendline.startTime, value: trendline.startPrice },
+          { time: trendline.endTime, value: trendline.endPrice }
+        ];
+        
+        // Defensive check before setData
+        if (lineData.every(point => point.time != null && Number.isFinite(point.value))) {
+          trendlineSeries.setData(lineData);
+          currentTrendlines.push(trendlineSeries);
+        } else {
+          console.warn('[EOD] Skipped invalid trendline data:', lineData);
+          chart.removeSeries(trendlineSeries);
+        }
+      } catch (error) {
+        console.error('[EOD] Error drawing trendline:', error, trendline);
+      }
+    });
+    
+    // Clean up invalid trendlines from storage if we filtered any out
+    if (validTrendlines.length !== symbolTrendlines.length) {
+      if (!trendlines[currentSymbol]) trendlines[currentSymbol] = [];
+      trendlines[currentSymbol] = validTrendlines;
+      saveTrendlines();
+      log(`Cleaned up ${symbolTrendlines.length - validTrendlines.length} invalid trendlines`);
+    }
+  }
+
   function drawLevelsOnChart() {
     // Clear existing level lines
     currentLevels.forEach(line => candleSeries.removePriceLine(line));
@@ -414,8 +528,8 @@
       const priceLine = {
         price: level.price,
         color: '#60a5fa',
-        lineWidth: 1,
-        lineStyle: 2, // dashed
+        lineWidth: 2,
+        lineStyle: 0, // solid line, thicker
         axisLabelVisible: true,
         title: `Level ${level.price.toFixed(2)}`
       };
@@ -429,12 +543,31 @@
     chart.subscribeClick(param => {
       if (drawingMode && param.point) {
         const price = candleSeries.coordinateToPrice(param.point.y);
-        if (price !== null) {
-          addLevel(price);
-          // Auto-disable drawing mode after adding level
-          drawingMode = false;
-          $('#level-tool').classList.remove('active');
-          log(`Added level at ${price.toFixed(2)}`);
+        const time = chart.timeScale().coordinateToTime(param.point.x);
+        
+        if (price !== null && !isNaN(price) && time !== null && time !== undefined) {
+          if (drawingTool === 'level') {
+            addLevel(price);
+            // Auto-disable drawing mode after adding level
+            drawingMode = false;
+            $('#level-tool').classList.remove('active');
+            log(`Added level at ${price.toFixed(2)}`);
+          } else if (drawingTool === 'trendline') {
+            if (!trendlineStart) {
+              // First click - set start point
+              trendlineStart = { time, price };
+              log('Click second point to complete trendline');
+            } else {
+              // Second click - complete trendline
+              addTrendline(trendlineStart.time, trendlineStart.price, time, price);
+              log(`Added trendline from ${trendlineStart.price.toFixed(2)} to ${price.toFixed(2)}`);
+              
+              // Reset for next trendline
+              trendlineStart = null;
+              drawingMode = false;
+              $('#trendline-tool').classList.remove('active');
+            }
+          }
         }
       }
     });
@@ -460,8 +593,8 @@
     loadSymbol(currentSymbol); // refresh chart
   });
 
-  $('#atr-toggle').addEventListener('click', () => {
-    indicators.atr14 = !indicators.atr14;
+  $('#bb-toggle').addEventListener('click', () => {
+    indicators.bb20 = !indicators.bb20;
     saveIndicators();
     updateIndicatorToggles();
     loadSymbol(currentSymbol); // refresh chart
@@ -469,16 +602,49 @@
 
   // Drawing tool buttons
   $('#level-tool').addEventListener('click', () => {
-    drawingMode = !drawingMode;
-    $('#level-tool').classList.toggle('active', drawingMode);
-    document.body.classList.toggle('drawing-mode', drawingMode);
-    log(drawingMode ? 'Click chart to add level' : 'Drawing mode off');
+    if (drawingTool === 'level' && drawingMode) {
+      // Turn off drawing mode
+      drawingMode = false;
+      $('#level-tool').classList.remove('active');
+      document.body.classList.remove('drawing-mode');
+      log('Drawing mode off');
+    } else {
+      // Switch to level tool
+      drawingMode = true;
+      drawingTool = 'level';
+      trendlineStart = null; // Reset trendline state
+      $('#level-tool').classList.add('active');
+      $('#trendline-tool').classList.remove('active');
+      document.body.classList.add('drawing-mode');
+      log('Click chart to add level');
+    }
+  });
+
+  $('#trendline-tool').addEventListener('click', () => {
+    if (drawingTool === 'trendline' && drawingMode) {
+      // Turn off drawing mode
+      drawingMode = false;
+      trendlineStart = null;
+      $('#trendline-tool').classList.remove('active');
+      document.body.classList.remove('drawing-mode');
+      log('Drawing mode off');
+    } else {
+      // Switch to trendline tool
+      drawingMode = true;
+      drawingTool = 'trendline';
+      trendlineStart = null;
+      $('#trendline-tool').classList.add('active');
+      $('#level-tool').classList.remove('active');
+      document.body.classList.add('drawing-mode');
+      log('Click chart to place first point of trendline');
+    }
   });
 
   $('#clear-all').addEventListener('click', () => {
-    if (confirm('Clear all levels for ' + currentSymbol + '?')) {
+    if (confirm('Clear all levels and trendlines for ' + currentSymbol + '?')) {
       clearAllLevels();
-      log('All levels cleared');
+      clearAllTrendlines();
+      log('All levels and trendlines cleared');
     }
   });
 
@@ -499,6 +665,7 @@
   updateWatchlistDisplay();
   updateIndicatorToggles();
   updateLevelsDisplay();
+  updateTrendlinesDisplay();
   setupChartInteraction();
   loadSymbol(currentSymbol);
 
