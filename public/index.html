@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>EOD Watch — Minimal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Lightweight Charts -->
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    html, body { margin:0; padding:0; background:#0e1a24; color:#cbd5e1; height:100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #app { display:flex; flex-direction:column; height:100%; }
+    header { padding:8px 12px; border-bottom:1px solid #1f2937; display:flex; gap:8px; align-items:center; }
+    #ticker { width:120px; }
+    #chart { flex:1 1 auto; min-height: 520px; } /* <- must have height! */
+    #log { padding:6px 12px; font-size:12px; border-top:1px solid #1f2937; color:#9ca3af; }
+    button { background:#1d4ed8; color:#fff; border:0; border-radius:6px; padding:6px 10px; cursor:pointer; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    input { background:#0b1220; color:#e5e7eb; border:1px solid #374151; border-radius:6px; padding:6px 8px; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <input id="ticker" value="AAPL" />
+    <button id="loadBtn">Load</button>
+    <span id="tip">Tip: press <b>Load</b></span>
+  </header>
+  <div id="chart"></div>
+  <div id="log">—</div>
+</div>
+
+<script>
+(function () {
+  const API = ''; // same origin: http://localhost:3000
+  const $ = s => document.querySelector(s);
+  const log = m => { $('#log').textContent = m; console.log('[EOD]', m); };
+
+  // ---- Chart init
+  const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+    autoSize: true,
+    layout: { background: { color: '#0e1a24' }, textColor: '#cbd5e1' },
+    grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
+    rightPriceScale: { borderColor: '#334155' },
+    timeScale: { borderColor: '#334155' }
+  });
+  const candleSeries = chart.addCandlestickSeries();
+  // quick EMA(200) in front-end just for display
+  const emaSeries = chart.addLineSeries({ color: '#60a5fa', lineWidth: 2 });
+
+  function ema(values, period) {
+    if (values.length === 0) return [];
+    const k = 2 / (period + 1);
+    let emaVal = values[0];
+    const out = [{ time: values[0].time, value: emaVal }];
+    for (let i = 1; i < values.length; i++) {
+      emaVal = values[i].close * k + emaVal * (1 - k);
+      out.push({ time: values[i].time, value: emaVal });
+    }
+    return out;
+  }
+
+  async function fetchBars(symbol, days = 600) {
+    const url = `${API}/eod?symbol=${encodeURIComponent(symbol)}&days=${days}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const json = await r.json();
+    // Tiingo adapter -> Lightweight Charts
+    return (json.data || []).map(b => ({
+      time: b.time, open: b.open, high: b.high, low: b.low, close: b.close
+    }));
+  }
+
+  async function loadSymbol(sym) {
+    try {
+      $('#loadBtn').disabled = true;
+      log(`Loading ${sym}…`);
+      const bars = await fetchBars(sym, 600);
+      if (!bars.length) { log('No data returned.'); return; }
+      candleSeries.setData(bars);
+      const ema200 = ema(bars, 200);
+      emaSeries.setData(ema200);
+      chart.timeScale().fitContent();
+      log(`Loaded ${sym}: ${bars.length} bars`);
+    } catch (e) {
+      log('Load failed: ' + e.message);
+    } finally {
+      $('#loadBtn').disabled = false;
+    }
+  }
+
+  // health check (optional debug)
+  fetch(`${API}/healthz`).then(r => log(r.ok ? 'Backend OK' : 'Backend NOT OK'));
+
+  $('#loadBtn').addEventListener('click', () => loadSymbol($('#ticker').value.trim().toUpperCase()));
+  // auto-load once
+  loadSymbol($('#ticker').value.trim().toUpperCase());
+})();
+</script>
+</body>
+</html>
