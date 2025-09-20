@@ -8,11 +8,36 @@
   <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     html, body { margin:0; padding:0; background:#0e1a24; color:#cbd5e1; height:100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    #app { display:flex; flex-direction:column; height:100%; }
-    header { padding:8px 12px; border-bottom:1px solid #1f2937; display:flex; gap:8px; align-items:center; }
-    #ticker { width:120px; }
-    #chart { flex:1 1 auto; min-height: 520px; } /* <- must have height! */
+    #app { display:flex; height:100%; }
+    #sidebar { width:250px; background:#0b1220; border-right:1px solid #1f2937; display:flex; flex-direction:column; }
+    #main { flex:1; display:flex; flex-direction:column; }
+    header { padding:8px 12px; border-bottom:1px solid #1f2937; display:flex; gap:8px; align-items:center; justify-content:space-between; }
+    #current-symbol { font-size:18px; font-weight:600; color:#60a5fa; }
+    #timeframes { display:flex; gap:4px; }
+    .timeframe-btn { background:#374151; color:#cbd5e1; border:0; border-radius:4px; padding:4px 8px; font-size:12px; cursor:pointer; }
+    .timeframe-btn.active { background:#1d4ed8; }
+    #chart { flex:1 1 auto; min-height: 520px; }
     #log { padding:6px 12px; font-size:12px; border-top:1px solid #1f2937; color:#9ca3af; }
+    
+    /* Watchlist styles */
+    #watchlist-header { padding:12px; border-bottom:1px solid #1f2937; }
+    #add-symbol { display:flex; gap:4px; margin-bottom:8px; }
+    #new-symbol { flex:1; }
+    #watchlist { flex:1; overflow-y:auto; }
+    .symbol-item { padding:8px 12px; cursor:pointer; border-bottom:1px solid #1e293b; display:flex; justify-content:space-between; align-items:center; }
+    .symbol-item:hover { background:#1e293b; }
+    .symbol-item.active { background:#1d4ed8; }
+    .symbol-name { font-weight:500; }
+    .remove-btn { background:#dc2626; font-size:12px; padding:2px 6px; border-radius:3px; }
+    
+    /* Indicators */
+    #indicators { padding:8px 12px; border-bottom:1px solid #1f2937; }
+    .indicator-toggle { display:flex; align-items:center; gap:6px; margin-bottom:4px; font-size:12px; }
+    .toggle-switch { width:32px; height:16px; background:#374151; border-radius:8px; position:relative; cursor:pointer; }
+    .toggle-switch.active { background:#1d4ed8; }
+    .toggle-knob { width:12px; height:12px; background:#fff; border-radius:50%; position:absolute; top:2px; left:2px; transition:left 0.2s; }
+    .toggle-switch.active .toggle-knob { left:18px; }
+    
     button { background:#1d4ed8; color:#fff; border:0; border-radius:6px; padding:6px 10px; cursor:pointer; }
     button:disabled { opacity:.5; cursor:not-allowed; }
     input { background:#0b1220; color:#e5e7eb; border:1px solid #374151; border-radius:6px; padding:6px 8px; }
@@ -20,20 +45,56 @@
 </head>
 <body>
 <div id="app">
-  <header>
-    <input id="ticker" value="AAPL" />
-    <button id="loadBtn">Load</button>
-    <span id="tip">Tip: press <b>Load</b></span>
-  </header>
-  <div id="chart"></div>
-  <div id="log">—</div>
+  <div id="sidebar">
+    <div id="watchlist-header">
+      <h3 style="margin:0 0 8px 0; font-size:14px; color:#9ca3af;">WATCHLIST</h3>
+      <div id="add-symbol">
+        <input id="new-symbol" placeholder="Add symbol..." />
+        <button id="add-btn">+</button>
+      </div>
+    </div>
+    <div id="watchlist"></div>
+    <div id="indicators">
+      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">INDICATORS</h4>
+      <div class="indicator-toggle">
+        <div class="toggle-switch active" id="ema-toggle">
+          <div class="toggle-knob"></div>
+        </div>
+        <span>EMA(200)</span>
+      </div>
+      <div class="indicator-toggle">
+        <div class="toggle-switch" id="atr-toggle">
+          <div class="toggle-knob"></div>
+        </div>
+        <span>ATR(14)</span>
+      </div>
+    </div>
+  </div>
+  <div id="main">
+    <header>
+      <div id="current-symbol">AAPL</div>
+      <div id="timeframes">
+        <button class="timeframe-btn active" data-tf="1D">1D</button>
+        <button class="timeframe-btn" data-tf="1W">1W</button>
+        <button class="timeframe-btn" data-tf="1M">1M</button>
+      </div>
+    </header>
+    <div id="chart"></div>
+    <div id="log">—</div>
+  </div>
 </div>
 
 <script>
 (function () {
-  const API = ''; // same origin: http://localhost:3000
+  const API = ''; // same origin
   const $ = s => document.querySelector(s);
+  const $$ = s => document.querySelectorAll(s);
   const log = m => { $('#log').textContent = m; console.log('[EOD]', m); };
+
+  // ---- Watchlist State
+  let watchlist = JSON.parse(localStorage.getItem('eod-watchlist') || '["AAPL", "META", "TSLA", "GOOGL", "MSFT"]');
+  let currentSymbol = localStorage.getItem('eod-current-symbol') || 'AAPL';
+  let indicators = JSON.parse(localStorage.getItem('eod-indicators') || '{"ema200": true, "atr14": false}');
 
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
@@ -44,17 +105,50 @@
     timeScale: { borderColor: '#334155' }
   });
   const candleSeries = chart.addCandlestickSeries();
-  // quick EMA(200) in front-end just for display
+  // indicators
   const emaSeries = chart.addLineSeries({ color: '#60a5fa', lineWidth: 2 });
+  const atrSeries = chart.addLineSeries({ 
+    color: '#f59e0b', 
+    lineWidth: 1,
+    priceScaleId: 'left'
+  });
+  
+  // Enable left price scale for ATR
+  chart.applyOptions({
+    leftPriceScale: {
+      visible: true,
+      borderColor: '#334155'
+    }
+  });
 
+  // ---- Indicator calculations
   function ema(values, period) {
     if (values.length === 0) return [];
     const k = 2 / (period + 1);
-    let emaVal = values[0];
+    let emaVal = values[0].close;
     const out = [{ time: values[0].time, value: emaVal }];
     for (let i = 1; i < values.length; i++) {
       emaVal = values[i].close * k + emaVal * (1 - k);
       out.push({ time: values[i].time, value: emaVal });
+    }
+    return out;
+  }
+
+  function atr(values, period) {
+    if (values.length < period + 1) return [];
+    const trs = [];
+    for (let i = 1; i < values.length; i++) {
+      const high = values[i].high;
+      const low = values[i].low;
+      const prevClose = values[i-1].close;
+      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+      trs.push(tr);
+    }
+    // Simple moving average of TR
+    const out = [];
+    for (let i = period - 1; i < trs.length; i++) {
+      const sum = trs.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
+      out.push({ time: values[i + 1].time, value: sum / period });
     }
     return out;
   }
@@ -72,28 +166,149 @@
 
   async function loadSymbol(sym) {
     try {
-      $('#loadBtn').disabled = true;
       log(`Loading ${sym}…`);
       const bars = await fetchBars(sym, 600);
       if (!bars.length) { log('No data returned.'); return; }
+      
+      // Update chart
       candleSeries.setData(bars);
-      const ema200 = ema(bars, 200);
-      emaSeries.setData(ema200);
+      
+      // Update indicators based on toggles
+      if (indicators.ema200) {
+        const ema200 = ema(bars, 200);
+        emaSeries.setData(ema200);
+      } else {
+        emaSeries.setData([]);
+      }
+      
+      if (indicators.atr14) {
+        const atr14 = atr(bars, 14);
+        atrSeries.setData(atr14);
+      } else {
+        atrSeries.setData([]);
+      }
+      
       chart.timeScale().fitContent();
+      currentSymbol = sym;
+      $('#current-symbol').textContent = sym;
+      localStorage.setItem('eod-current-symbol', sym);
+      updateWatchlistDisplay();
       log(`Loaded ${sym}: ${bars.length} bars`);
     } catch (e) {
       log('Load failed: ' + e.message);
-    } finally {
-      $('#loadBtn').disabled = false;
     }
   }
 
-  // health check (optional debug)
+  // ---- Watchlist Management
+  function saveWatchlist() {
+    localStorage.setItem('eod-watchlist', JSON.stringify(watchlist));
+  }
+
+  function addSymbol() {
+    const symbol = $('#new-symbol').value.trim().toUpperCase();
+    // Validate symbol format (alphanumeric, dots, dashes only)
+    if (symbol && /^[A-Z0-9\.\-]{1,10}$/.test(symbol) && !watchlist.includes(symbol)) {
+      watchlist.push(symbol);
+      saveWatchlist();
+      updateWatchlistDisplay();
+      $('#new-symbol').value = '';
+    } else if (symbol && !watchlist.includes(symbol)) {
+      log('Invalid symbol format. Use letters, numbers, dots, and dashes only.');
+    }
+  }
+
+  function removeSymbol(symbol) {
+    watchlist = watchlist.filter(s => s !== symbol);
+    saveWatchlist();
+    updateWatchlistDisplay();
+    if (currentSymbol === symbol && watchlist.length > 0) {
+      loadSymbol(watchlist[0]);
+    }
+  }
+
+  function updateWatchlistDisplay() {
+    const container = $('#watchlist');
+    container.innerHTML = ''; // Clear existing content
+    
+    watchlist.forEach(symbol => {
+      const item = document.createElement('div');
+      item.className = `symbol-item ${symbol === currentSymbol ? 'active' : ''}`;
+      item.dataset.symbol = symbol;
+      
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'symbol-name';
+      nameSpan.textContent = symbol; // Safe text content
+      
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'remove-btn';
+      removeBtn.textContent = '×';
+      removeBtn.dataset.symbol = symbol;
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeSymbol(e.target.dataset.symbol);
+      });
+      
+      item.appendChild(nameSpan);
+      item.appendChild(removeBtn);
+      container.appendChild(item);
+    });
+  }
+
+  function updateIndicatorToggles() {
+    $('#ema-toggle').className = indicators.ema200 ? 'toggle-switch active' : 'toggle-switch';
+    $('#atr-toggle').className = indicators.atr14 ? 'toggle-switch active' : 'toggle-switch';
+  }
+
+  function saveIndicators() {
+    localStorage.setItem('eod-indicators', JSON.stringify(indicators));
+  }
+
+  // ---- Event Listeners
+  $('#add-btn').addEventListener('click', addSymbol);
+  $('#new-symbol').addEventListener('keypress', e => e.key === 'Enter' && addSymbol());
+
+  // Watchlist clicks
+  $('#watchlist').addEventListener('click', e => {
+    const item = e.target.closest('.symbol-item');
+    if (item && !e.target.classList.contains('remove-btn')) {
+      loadSymbol(item.dataset.symbol);
+    }
+  });
+
+  // Indicator toggles
+  $('#ema-toggle').addEventListener('click', () => {
+    indicators.ema200 = !indicators.ema200;
+    saveIndicators();
+    updateIndicatorToggles();
+    loadSymbol(currentSymbol); // refresh chart
+  });
+
+  $('#atr-toggle').addEventListener('click', () => {
+    indicators.atr14 = !indicators.atr14;
+    saveIndicators();
+    updateIndicatorToggles();
+    loadSymbol(currentSymbol); // refresh chart
+  });
+
+  // Timeframe buttons (visual only for now)
+  $$('.timeframe-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      $$('.timeframe-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      // TODO: implement actual timeframe switching
+      log(`Timeframe: ${btn.dataset.tf} (coming soon)`);
+    });
+  });
+
+  // ---- Initialize
+  updateWatchlistDisplay();
+  updateIndicatorToggles();
+  loadSymbol(currentSymbol);
+
+  // health check
   fetch(`${API}/healthz`).then(r => log(r.ok ? 'Backend OK' : 'Backend NOT OK'));
 
-  $('#loadBtn').addEventListener('click', () => loadSymbol($('#ticker').value.trim().toUpperCase()));
-  // auto-load once
-  loadSymbol($('#ticker').value.trim().toUpperCase());
+  // removeSymbol no longer needs to be global (using event delegation)
 })();
 </script>
 </body>
