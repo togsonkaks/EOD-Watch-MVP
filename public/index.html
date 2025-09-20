@@ -16,7 +16,10 @@
     #timeframes { display:flex; gap:4px; }
     .timeframe-btn { background:#374151; color:#cbd5e1; border:0; border-radius:4px; padding:4px 8px; font-size:12px; cursor:pointer; }
     .timeframe-btn.active { background:#1d4ed8; }
-    #chart { flex:1 1 auto; min-height: 520px; }
+    #chart { flex:1 1 auto; min-height: 520px; position:relative; }
+    .drawing-mode #chart { cursor: crosshair; }
+    .loading-overlay { position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(14,26,36,0.8); display:none; align-items:center; justify-content:center; color:#60a5fa; font-size:14px; }
+    .loading-overlay.show { display:flex; }
     #log { padding:6px 12px; font-size:12px; border-top:1px solid #1f2937; color:#9ca3af; }
     
     /* Watchlist styles */
@@ -50,6 +53,25 @@
     .level-controls { display:flex; gap:4px; }
     .level-controls button { background:none; border:0; color:#9ca3af; cursor:pointer; padding:2px; }
     .level-controls button:hover { color:#cbd5e1; }
+    
+    /* Status indicators */
+    .status-dot { width:8px; height:8px; border-radius:50%; margin-right:6px; }
+    .status-connected { background:#10b981; }
+    .status-loading { background:#f59e0b; animation:pulse 1.5s infinite; }
+    .status-error { background:#dc2626; }
+    @keyframes pulse { 0%, 100% { opacity:1; } 50% { opacity:0.5; } }
+    
+    /* Improved hover states */
+    .symbol-item:hover, .tool-btn:hover, .timeframe-btn:hover { transform:translateY(-1px); transition:transform 0.1s; }
+    
+    /* Better visual feedback */
+    .tool-btn.active { box-shadow:0 0 8px rgba(29,78,216,0.4); }
+    
+    /* Responsive improvements */
+    @media (max-width: 768px) {
+      #sidebar { width:200px; }
+      .timeframe-btn { padding:3px 6px; font-size:11px; }
+    }
     
     button { background:#1d4ed8; color:#fff; border:0; border-radius:6px; padding:6px 10px; cursor:pointer; }
     button:disabled { opacity:.5; cursor:not-allowed; }
@@ -94,14 +116,21 @@
   </div>
   <div id="main">
     <header>
-      <div id="current-symbol">AAPL</div>
+      <div style="display:flex; align-items:center;">
+        <div class="status-dot status-connected" id="status-dot"></div>
+        <div id="current-symbol">AAPL</div>
+      </div>
       <div id="timeframes">
         <button class="timeframe-btn active" data-tf="1D">1D</button>
-        <button class="timeframe-btn" data-tf="1W">1W</button>
-        <button class="timeframe-btn" data-tf="1M">1M</button>
+        <button class="timeframe-btn" data-tf="1W" title="Weekly aggregation (Phase 3)">1W</button>
+        <button class="timeframe-btn" data-tf="1M" title="Monthly aggregation (Phase 3)">1M</button>
       </div>
     </header>
-    <div id="chart"></div>
+    <div id="chart">
+      <div class="loading-overlay" id="loading-overlay">
+        <div>Loading chart data...</div>
+      </div>
+    </div>
     <div id="log">—</div>
   </div>
 </div>
@@ -191,9 +220,17 @@
 
   async function loadSymbol(sym) {
     try {
+      // Show loading state
+      $('#loading-overlay').classList.add('show');
+      $('#status-dot').className = 'status-dot status-loading';
       log(`Loading ${sym}…`);
+      
       const bars = await fetchBars(sym, 600);
-      if (!bars.length) { log('No data returned.'); return; }
+      if (!bars.length) { 
+        log('No data returned.'); 
+        $('#status-dot').className = 'status-dot status-error';
+        return; 
+      }
       
       // Update chart
       candleSeries.setData(bars);
@@ -220,9 +257,16 @@
       updateWatchlistDisplay();
       updateLevelsDisplay();
       drawLevelsOnChart();
+      
+      // Update status to connected
+      $('#status-dot').className = 'status-dot status-connected';
       log(`Loaded ${sym}: ${bars.length} bars`);
     } catch (e) {
       log('Load failed: ' + e.message);
+      $('#status-dot').className = 'status-dot status-error';
+    } finally {
+      // Hide loading state
+      $('#loading-overlay').classList.remove('show');
     }
   }
 
@@ -427,6 +471,7 @@
   $('#level-tool').addEventListener('click', () => {
     drawingMode = !drawingMode;
     $('#level-tool').classList.toggle('active', drawingMode);
+    document.body.classList.toggle('drawing-mode', drawingMode);
     log(drawingMode ? 'Click chart to add level' : 'Drawing mode off');
   });
 
@@ -437,13 +482,16 @@
     }
   });
 
-  // Timeframe buttons (visual only for now)
+  // Timeframe buttons (1D active, 1W/1M planned for Phase 3)
   $$('.timeframe-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      $$('.timeframe-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      // TODO: implement actual timeframe switching
-      log(`Timeframe: ${btn.dataset.tf} (coming soon)`);
+      if (btn.dataset.tf === '1D') {
+        $$('.timeframe-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        log('Daily timeframe selected');
+      } else {
+        log(`${btn.dataset.tf} aggregation planned for Phase 3`);
+      }
     });
   });
 
@@ -454,8 +502,21 @@
   setupChartInteraction();
   loadSymbol(currentSymbol);
 
-  // health check
-  fetch(`${API}/healthz`).then(r => log(r.ok ? 'Backend OK' : 'Backend NOT OK'));
+  // health check with status indicator
+  fetch(`${API}/healthz`)
+    .then(r => {
+      if (r.ok) {
+        log('Backend OK');
+        $('#status-dot').className = 'status-dot status-connected';
+      } else {
+        log('Backend NOT OK');
+        $('#status-dot').className = 'status-dot status-error';
+      }
+    })
+    .catch(e => {
+      log('Backend connection failed');
+      $('#status-dot').className = 'status-dot status-error';
+    });
 
   // removeSymbol no longer needs to be global (using event delegation)
 })();
