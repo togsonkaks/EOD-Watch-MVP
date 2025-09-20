@@ -38,6 +38,19 @@
     .toggle-knob { width:12px; height:12px; background:#fff; border-radius:50%; position:absolute; top:2px; left:2px; transition:left 0.2s; }
     .toggle-switch.active .toggle-knob { left:18px; }
     
+    /* Drawing Tools */
+    #drawing-tools { padding:8px 12px; border-bottom:1px solid #1f2937; }
+    .tool-btn { background:#374151; color:#cbd5e1; border:0; border-radius:4px; padding:6px 8px; font-size:12px; cursor:pointer; margin-right:4px; margin-bottom:4px; }
+    .tool-btn.active { background:#1d4ed8; }
+    
+    /* Levels */
+    #levels { padding:8px 12px; flex:1; overflow-y:auto; }
+    .level-item { display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid #1e293b; }
+    .level-price { font-family:monospace; font-size:11px; color:#60a5fa; }
+    .level-controls { display:flex; gap:4px; }
+    .level-controls button { background:none; border:0; color:#9ca3af; cursor:pointer; padding:2px; }
+    .level-controls button:hover { color:#cbd5e1; }
+    
     button { background:#1d4ed8; color:#fff; border:0; border-radius:6px; padding:6px 10px; cursor:pointer; }
     button:disabled { opacity:.5; cursor:not-allowed; }
     input { background:#0b1220; color:#e5e7eb; border:1px solid #374151; border-radius:6px; padding:6px 8px; }
@@ -69,6 +82,15 @@
         <span>ATR(14)</span>
       </div>
     </div>
+    <div id="drawing-tools">
+      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">DRAWING</h4>
+      <button class="tool-btn" id="level-tool">Level</button>
+      <button class="tool-btn" id="clear-all">Clear</button>
+    </div>
+    <div id="levels">
+      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">LEVELS</h4>
+      <div id="levels-list"></div>
+    </div>
   </div>
   <div id="main">
     <header>
@@ -91,10 +113,13 @@
   const $$ = s => document.querySelectorAll(s);
   const log = m => { $('#log').textContent = m; console.log('[EOD]', m); };
 
-  // ---- Watchlist State
+  // ---- Application State
   let watchlist = JSON.parse(localStorage.getItem('eod-watchlist') || '["AAPL", "META", "TSLA", "GOOGL", "MSFT"]');
   let currentSymbol = localStorage.getItem('eod-current-symbol') || 'AAPL';
   let indicators = JSON.parse(localStorage.getItem('eod-indicators') || '{"ema200": true, "atr14": false}');
+  let levels = JSON.parse(localStorage.getItem('eod-levels') || '{}'); // symbol -> levels mapping
+  let drawingMode = false;
+  let currentLevels = []; // active level lines on chart
 
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
@@ -193,6 +218,8 @@
       $('#current-symbol').textContent = sym;
       localStorage.setItem('eod-current-symbol', sym);
       updateWatchlistDisplay();
+      updateLevelsDisplay();
+      drawLevelsOnChart();
       log(`Loaded ${sym}: ${bars.length} bars`);
     } catch (e) {
       log('Load failed: ' + e.message);
@@ -263,6 +290,112 @@
     localStorage.setItem('eod-indicators', JSON.stringify(indicators));
   }
 
+  function saveLevels() {
+    localStorage.setItem('eod-levels', JSON.stringify(levels));
+  }
+
+  function getLevelsForSymbol(symbol) {
+    return levels[symbol] || [];
+  }
+
+  function addLevel(price) {
+    if (!levels[currentSymbol]) levels[currentSymbol] = [];
+    const levelId = Date.now().toString();
+    const level = {
+      id: levelId,
+      price: price,
+      symbol: currentSymbol
+    };
+    levels[currentSymbol].push(level);
+    saveLevels();
+    updateLevelsDisplay();
+    drawLevelsOnChart();
+    return level;
+  }
+
+  function removeLevel(levelId) {
+    if (levels[currentSymbol]) {
+      levels[currentSymbol] = levels[currentSymbol].filter(l => l.id !== levelId);
+      saveLevels();
+      updateLevelsDisplay();
+      drawLevelsOnChart();
+    }
+  }
+
+  function clearAllLevels() {
+    if (levels[currentSymbol]) {
+      levels[currentSymbol] = [];
+      saveLevels();
+      updateLevelsDisplay();
+      drawLevelsOnChart();
+    }
+  }
+
+  function updateLevelsDisplay() {
+    const container = $('#levels-list');
+    container.innerHTML = '';
+    
+    const symbolLevels = getLevelsForSymbol(currentSymbol);
+    symbolLevels.forEach(level => {
+      const item = document.createElement('div');
+      item.className = 'level-item';
+      
+      const priceSpan = document.createElement('span');
+      priceSpan.className = 'level-price';
+      priceSpan.textContent = level.price.toFixed(2);
+      
+      const controls = document.createElement('div');
+      controls.className = 'level-controls';
+      
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = '×';
+      deleteBtn.title = 'Delete level';
+      deleteBtn.addEventListener('click', () => removeLevel(level.id));
+      
+      controls.appendChild(deleteBtn);
+      item.appendChild(priceSpan);
+      item.appendChild(controls);
+      container.appendChild(item);
+    });
+  }
+
+  function drawLevelsOnChart() {
+    // Clear existing level lines
+    currentLevels.forEach(line => candleSeries.removePriceLine(line));
+    currentLevels = [];
+    
+    // Draw current symbol's levels
+    const symbolLevels = getLevelsForSymbol(currentSymbol);
+    symbolLevels.forEach(level => {
+      const priceLine = {
+        price: level.price,
+        color: '#60a5fa',
+        lineWidth: 1,
+        lineStyle: 2, // dashed
+        axisLabelVisible: true,
+        title: `Level ${level.price.toFixed(2)}`
+      };
+      const line = candleSeries.createPriceLine(priceLine);
+      currentLevels.push(line);
+    });
+  }
+
+  // ---- Chart Interaction
+  function setupChartInteraction() {
+    chart.subscribeClick(param => {
+      if (drawingMode && param.point) {
+        const price = candleSeries.coordinateToPrice(param.point.y);
+        if (price !== null) {
+          addLevel(price);
+          // Auto-disable drawing mode after adding level
+          drawingMode = false;
+          $('#level-tool').classList.remove('active');
+          log(`Added level at ${price.toFixed(2)}`);
+        }
+      }
+    });
+  }
+
   // ---- Event Listeners
   $('#add-btn').addEventListener('click', addSymbol);
   $('#new-symbol').addEventListener('keypress', e => e.key === 'Enter' && addSymbol());
@@ -290,6 +423,20 @@
     loadSymbol(currentSymbol); // refresh chart
   });
 
+  // Drawing tool buttons
+  $('#level-tool').addEventListener('click', () => {
+    drawingMode = !drawingMode;
+    $('#level-tool').classList.toggle('active', drawingMode);
+    log(drawingMode ? 'Click chart to add level' : 'Drawing mode off');
+  });
+
+  $('#clear-all').addEventListener('click', () => {
+    if (confirm('Clear all levels for ' + currentSymbol + '?')) {
+      clearAllLevels();
+      log('All levels cleared');
+    }
+  });
+
   // Timeframe buttons (visual only for now)
   $$('.timeframe-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -303,6 +450,8 @@
   // ---- Initialize
   updateWatchlistDisplay();
   updateIndicatorToggles();
+  updateLevelsDisplay();
+  setupChartInteraction();
   loadSymbol(currentSymbol);
 
   // health check
