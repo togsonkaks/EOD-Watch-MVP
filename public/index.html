@@ -67,6 +67,13 @@
     /* Better visual feedback */
     .tool-btn.active { box-shadow:0 0 8px rgba(29,78,216,0.4); }
     
+    /* Line Controls */
+    #line-controls { padding:8px 12px; border-bottom:1px solid #1f2937; display:none; }
+    .color-picker { display:flex; gap:4px; margin:4px 0; }
+    .color-option { width:20px; height:20px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
+    .color-option.active { border-color:#60a5fa; }
+    .color-option:hover { transform:scale(1.1); }
+    
     /* Responsive improvements */
     @media (max-width: 768px) {
       #sidebar { width:200px; }
@@ -110,6 +117,18 @@
       <button class="tool-btn" id="trendline-tool">Trendline</button>
       <button class="tool-btn" id="clear-all">Clear</button>
     </div>
+    <div id="line-controls">
+      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">LINE OPTIONS</h4>
+      <div class="color-picker">
+        <div class="color-option" style="background:#60a5fa" data-color="#60a5fa" title="Blue"></div>
+        <div class="color-option" style="background:#f59e0b" data-color="#f59e0b" title="Orange"></div>
+        <div class="color-option" style="background:#10b981" data-color="#10b981" title="Green"></div>
+        <div class="color-option" style="background:#ef4444" data-color="#ef4444" title="Red"></div>
+        <div class="color-option" style="background:#8b5cf6" data-color="#8b5cf6" title="Purple"></div>
+        <div class="color-option" style="background:#f97316" data-color="#f97316" title="Yellow"></div>
+      </div>
+      <button class="tool-btn" id="delete-line" style="background:#dc2626; width:100%; margin-top:4px;">Delete Selected Line</button>
+    </div>
     <div id="levels">
       <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">LEVELS</h4>
       <div id="levels-list"></div>
@@ -152,8 +171,12 @@
   let drawingMode = false;
   let drawingTool = 'level'; // 'level' or 'trendline'
   let trendlineStart = null; // for 2-point trendline drawing
+  let previewTrendline = null; // preview line while drawing
   let currentLevels = []; // active level lines on chart
   let currentTrendlines = []; // active trendlines on chart
+  let selectedLine = null; // currently selected line for editing
+  let lineHandles = []; // visual handles for selected line
+  let isLineSelected = false; // flag to track selection state
 
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
@@ -367,7 +390,9 @@
       startPrice: startPrice,
       endTime: endTime,
       endPrice: endPrice,
-      symbol: currentSymbol
+      symbol: currentSymbol,
+      color: '#f59e0b', // default color
+      selected: false
     };
     trendlines[currentSymbol].push(trendline);
     saveTrendlines();
@@ -404,7 +429,9 @@
     const level = {
       id: levelId,
       price: price,
-      symbol: currentSymbol
+      symbol: currentSymbol,
+      color: '#60a5fa', // default color
+      selected: false
     };
     levels[currentSymbol].push(level);
     saveLevels();
@@ -481,11 +508,11 @@
       Number.isFinite(t.endPrice)
     );
     
-    validTrendlines.forEach(trendline => {
+    validTrendlines.forEach((trendline, index) => {
       try {
         const trendlineSeries = chart.addLineSeries({
-          color: '#f59e0b',
-          lineWidth: 2,
+          color: trendline.color || '#f59e0b',
+          lineWidth: trendline.selected ? 3 : 2, // Thicker when selected
           lineStyle: 0
         });
         
@@ -498,6 +525,9 @@
         // Defensive check before setData
         if (lineData.every(point => point.time != null && Number.isFinite(point.value))) {
           trendlineSeries.setData(lineData);
+          // Store reference to trendline data for selection
+          trendlineSeries._trendlineData = trendline;
+          trendlineSeries._trendlineIndex = index;
           currentTrendlines.push(trendlineSeries);
         } else {
           console.warn('[EOD] Skipped invalid trendline data:', lineData);
@@ -524,16 +554,18 @@
     
     // Draw current symbol's levels
     const symbolLevels = getLevelsForSymbol(currentSymbol);
-    symbolLevels.forEach(level => {
+    symbolLevels.forEach((level, index) => {
       const priceLine = {
         price: level.price,
-        color: '#60a5fa',
-        lineWidth: 2,
+        color: level.color || '#60a5fa',
+        lineWidth: level.selected ? 3 : 2, // Thicker when selected
         lineStyle: 0, // solid line, thicker
         axisLabelVisible: true,
         title: `Level ${level.price.toFixed(2)}`
       };
       const line = candleSeries.createPriceLine(priceLine);
+      line._levelData = level;
+      line._levelIndex = index;
       currentLevels.push(line);
     });
   }
@@ -541,36 +573,248 @@
   // ---- Chart Interaction
   function setupChartInteraction() {
     chart.subscribeClick(param => {
-      if (drawingMode && param.point) {
+      if (param.point) {
         const price = candleSeries.coordinateToPrice(param.point.y);
         const time = chart.timeScale().coordinateToTime(param.point.x);
         
         if (price !== null && !isNaN(price) && time !== null && time !== undefined) {
-          if (drawingTool === 'level') {
-            addLevel(price);
-            // Auto-disable drawing mode after adding level
-            drawingMode = false;
-            $('#level-tool').classList.remove('active');
-            log(`Added level at ${price.toFixed(2)}`);
-          } else if (drawingTool === 'trendline') {
-            if (!trendlineStart) {
-              // First click - set start point
-              trendlineStart = { time, price };
-              log('Click second point to complete trendline');
+          // Check if clicking on existing line for selection (when not in drawing mode)
+          if (!drawingMode) {
+            const clickedLine = findLineNearClick(param.point.x, param.point.y);
+            if (clickedLine) {
+              selectLine(clickedLine);
+              log(`Selected ${clickedLine.type} line`);
+              return;
             } else {
-              // Second click - complete trendline
-              addTrendline(trendlineStart.time, trendlineStart.price, time, price);
-              log(`Added trendline from ${trendlineStart.price.toFixed(2)} to ${price.toFixed(2)}`);
-              
-              // Reset for next trendline
-              trendlineStart = null;
+              // Clicked on empty space - deselect any selected line
+              deselectLine();
+            }
+          }
+          
+          // Handle drawing mode clicks
+          if (drawingMode) {
+            if (drawingTool === 'level') {
+              addLevel(price);
+              // Auto-disable drawing mode after adding level
               drawingMode = false;
-              $('#trendline-tool').classList.remove('active');
+              $('#level-tool').classList.remove('active');
+              log(`Added level at ${price.toFixed(2)}`);
+            } else if (drawingTool === 'trendline') {
+              if (!trendlineStart) {
+                // First click - set start point and enable preview
+                trendlineStart = { time, price };
+                enableTrendlinePreview();
+                log('Click second point to complete trendline');
+              } else {
+                // Second click - complete trendline
+                disableTrendlinePreview();
+                addTrendline(trendlineStart.time, trendlineStart.price, time, price);
+                log(`Added trendline from ${trendlineStart.price.toFixed(2)} to ${price.toFixed(2)}`);
+                
+                // Reset for next trendline
+                trendlineStart = null;
+                drawingMode = false;
+                $('#trendline-tool').classList.remove('active');
+              }
             }
           }
         }
       }
     });
+    
+    // Mouse move handler for live trendline preview
+    chart.subscribeCrosshairMove(param => {
+      if (drawingMode && drawingTool === 'trendline' && trendlineStart && param.point) {
+        const price = candleSeries.coordinateToPrice(param.point.y);
+        const time = chart.timeScale().coordinateToTime(param.point.x);
+        
+        if (price !== null && !isNaN(price) && time !== null && time !== undefined) {
+          updateTrendlinePreview(time, price);
+        }
+      }
+    });
+  }
+  
+  function enableTrendlinePreview() {
+    if (!previewTrendline) {
+      previewTrendline = chart.addLineSeries({
+        color: '#60a5fa',
+        lineWidth: 1,
+        lineStyle: 2, // dashed for preview
+        priceLineVisible: false,
+        lastValueVisible: false
+      });
+    }
+  }
+  
+  function updateTrendlinePreview(endTime, endPrice) {
+    if (previewTrendline && trendlineStart) {
+      const lineData = [
+        { time: trendlineStart.time, value: trendlineStart.price },
+        { time: endTime, value: endPrice }
+      ];
+      previewTrendline.setData(lineData);
+    }
+  }
+  
+  function disableTrendlinePreview() {
+    if (previewTrendline) {
+      chart.removeSeries(previewTrendline);
+      previewTrendline = null;
+    }
+  }
+  
+  function findLineNearClick(x, y) {
+    const tolerance = 8; // pixels
+    
+    // Check trendlines first
+    for (let series of currentTrendlines) {
+      if (series._trendlineData && isPointNearTrendline(x, y, series._trendlineData, tolerance)) {
+        return {
+          type: 'trendline',
+          series: series,
+          data: series._trendlineData,
+          index: series._trendlineIndex
+        };
+      }
+    }
+    
+    // Check levels
+    const clickPrice = candleSeries.coordinateToPrice(y);
+    const tolPrice = Math.abs(candleSeries.coordinateToPrice(y + tolerance) - candleSeries.coordinateToPrice(y));
+    for (let i=0;i<currentLevels.length;i++) {
+      const levelData = getLevelsForSymbol(currentSymbol)[i];
+      if (levelData && Math.abs(clickPrice - levelData.price) < tolPrice) {
+        return { type:'level', series: currentLevels[i], data: levelData, index: i };
+      }
+    }
+    
+    return null;
+  }
+  
+  function isPointNearTrendline(x, y, trendlineData, tolerance) {
+    // Convert trendline coordinates to pixels
+    const startX = chart.timeScale().timeToCoordinate(trendlineData.startTime);
+    const startY = candleSeries.priceToCoordinate(trendlineData.startPrice);
+    const endX = chart.timeScale().timeToCoordinate(trendlineData.endTime);
+    const endY = candleSeries.priceToCoordinate(trendlineData.endPrice);
+    
+    if (startX === null || startY === null || endX === null || endY === null) {
+      return false;
+    }
+    
+    // Calculate distance from point to line segment
+    const distance = distanceToLineSegment(x, y, startX, startY, endX, endY);
+    return distance <= tolerance;
+  }
+  
+  function distanceToLineSegment(x, y, x1, y1, x2, y2) {
+    const A = x - x1;
+    const B = y - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+    
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = -1;
+    
+    if (lenSq !== 0) {
+      param = dot / lenSq;
+    }
+    
+    let xx, yy;
+    if (param < 0) {
+      xx = x1;
+      yy = y1;
+    } else if (param > 1) {
+      xx = x2;
+      yy = y2;
+    } else {
+      xx = x1 + param * C;
+      yy = y1 + param * D;
+    }
+    
+    const dx = x - xx;
+    const dy = y - yy;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  
+  function selectLine(lineInfo) {
+    // Clear previous selections
+    getTrendlinesForSymbol(currentSymbol).forEach(t => t.selected = false);
+    getLevelsForSymbol(currentSymbol).forEach(l => l.selected = false);
+
+    selectedLine = lineInfo;
+    isLineSelected = true;
+    if (lineInfo.type === 'trendline') {
+      lineInfo.data.selected = true;
+      saveTrendlines();
+      drawTrendlinesOnChart();
+    } else if (lineInfo.type === 'level') {
+      lineInfo.data.selected = true;
+      saveLevels();
+      drawLevelsOnChart();
+    }
+    showLineControls(lineInfo);
+    updateLineHandles();
+  }
+
+  function deselectLine() {
+    if (!isLineSelected) return;
+    getTrendlinesForSymbol(currentSymbol).forEach(t => t.selected = false);
+    getLevelsForSymbol(currentSymbol).forEach(l => l.selected = false);
+    saveTrendlines();
+    saveLevels();
+    drawTrendlinesOnChart();
+    drawLevelsOnChart();
+    selectedLine = null;
+    isLineSelected = false;
+    hideLineControls();
+    clearLineHandles();
+  }
+
+  function showLineControls(lineInfo) {
+    const panel = document.getElementById('line-controls');
+    panel.style.display = 'block';
+    const curr = (lineInfo.data.color || (lineInfo.type==='trendline' ? '#f59e0b' : '#60a5fa'));
+    document.querySelectorAll('.color-option').forEach(o => o.classList.toggle('active', o.dataset.color === curr));
+  }
+  
+  function hideLineControls() { 
+    document.getElementById('line-controls').style.display='none'; 
+  }
+  
+  function deleteSelectedLine() {
+    if (!selectedLine) return;
+    if (selectedLine.type==='trendline') removeTrendline(selectedLine.data.id);
+    else removeLevel(selectedLine.data.id);
+    deselectLine();
+  }
+
+  // Simple handles for trendlines
+  function updateLineHandles() {
+    clearLineHandles();
+    if (!selectedLine || selectedLine.type!=='trendline') return;
+    const { startTime, startPrice, endTime, endPrice } = selectedLine.data;
+    const p = document.getElementById('chart');
+    const mk = (x,y)=>{ 
+      const d=document.createElement('div'); 
+      d.className='line-handle'; 
+      d.style.cssText='position:absolute;width:10px;height:10px;border:2px solid #fff;border-radius:50%;background:'+ (selectedLine.data.color||'#f59e0b')+';transform:translate(-50%,-50%);pointer-events:none;'; 
+      d.style.left=x+'px'; 
+      d.style.top=y+'px'; 
+      p.appendChild(d); 
+      lineHandles.push(d); 
+    };
+    const sx=chart.timeScale().timeToCoordinate(startTime), sy=candleSeries.priceToCoordinate(startPrice);
+    const ex=chart.timeScale().timeToCoordinate(endTime), ey=candleSeries.priceToCoordinate(endPrice);
+    if (sx!=null&&sy!=null) mk(sx,sy); 
+    if (ex!=null&&ey!=null) mk(ex,ey);
+  }
+  
+  function clearLineHandles() { 
+    lineHandles.forEach(h=>h.remove()); 
+    lineHandles=[]; 
   }
 
   // ---- Event Listeners
@@ -610,6 +854,7 @@
       log('Drawing mode off');
     } else {
       // Switch to level tool
+      disableTrendlinePreview(); // Clean up any preview
       drawingMode = true;
       drawingTool = 'level';
       trendlineStart = null; // Reset trendline state
@@ -625,11 +870,13 @@
       // Turn off drawing mode
       drawingMode = false;
       trendlineStart = null;
+      disableTrendlinePreview();
       $('#trendline-tool').classList.remove('active');
       document.body.classList.remove('drawing-mode');
       log('Drawing mode off');
     } else {
       // Switch to trendline tool
+      disableTrendlinePreview(); // Clean up any existing preview
       drawingMode = true;
       drawingTool = 'trendline';
       trendlineStart = null;
@@ -646,6 +893,26 @@
       clearAllTrendlines();
       log('All levels and trendlines cleared');
     }
+  });
+
+  // Color picker and delete button event listeners
+  document.getElementById('delete-line').addEventListener('click', deleteSelectedLine);
+  document.querySelectorAll('.color-option').forEach(opt => {
+    opt.addEventListener('click', () => {
+      if (!selectedLine) return;
+      const color = opt.dataset.color;
+      selectedLine.data.color = color;
+      if (selectedLine.type === 'trendline') { 
+        saveTrendlines(); 
+        drawTrendlinesOnChart(); 
+      } else { 
+        saveLevels(); 
+        drawLevelsOnChart(); 
+      }
+      // Keep selection visible after redraw
+      selectLine(selectedLine);
+      log(`Changed line color to ${color}`);
+    });
   });
 
   // Timeframe buttons (1D active, 1W/1M planned for Phase 3)
