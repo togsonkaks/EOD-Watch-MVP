@@ -4,7 +4,9 @@
   "description": "End-of-day watchlist with Tiingo proxy + custom chart tools",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "warm-cache": "node auto-update.js",
+    "warm-cache-test": "node auto-update.js --test"
   },
   "dependencies": {
     "axios": "^1.12.2",

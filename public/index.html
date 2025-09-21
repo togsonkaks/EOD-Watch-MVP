@@ -29,6 +29,20 @@
     aside{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:10px;overflow:auto}
     h3{margin:.25rem 0 .5rem 0;font-size:13px;color:var(--muted)}
     .list .row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dashed #20304a}
+    .row:hover{background:#0f1724}
+    .row.selected{background:#1e3a8a20;border-left:3px solid #3b82f6}
+    
+    /* Enhanced level styling */
+    .level-item .level-content{display:flex;align-items:center;gap:8px;flex:1}
+    .level-price{font-weight:500}
+    .level-color{width:12px;height:12px;border-radius:50%;border:1px solid #374151}
+    
+    /* Enhanced trendline styling */
+    .trendline-item .trendline-content{display:flex;flex-direction:column;gap:2px;flex:1}
+    .trendline-dates{font-size:11px;color:#64748b}
+    .trendline-prices{font-size:12px;font-weight:500}
+    .trendline-color{width:12px;height:3px;border-radius:2px;align-self:flex-start;margin-top:2px}
+    
     .kill{background:transparent;border:none;color:#f87171;cursor:pointer;font-size:16px}
     .status{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#0b1524;border:1px solid #22314a;border-radius:8px;padding:8px;white-space:pre-wrap;min-height:38px}
     .chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -1095,6 +1109,12 @@
     const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
     const filtered = symbolTrendlines.filter(t => t.id !== trendlineId);
     saveTrendlinesForSymbol(currentSymbol, currentTimeframe, filtered);
+    
+    // Clear selection if deleted trendline was selected
+    if (selectedLine && selectedLine.type === 'trendline' && selectedLine.data.id === trendlineId) {
+      selectedLine = null;
+    }
+    
     updateTrendlinesDisplay();
     drawTrendlinesOnChart();
   }
@@ -1122,10 +1142,54 @@
     return level;
   }
 
+  function selectLevel(levelId) {
+    const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+    
+    // Clear all selections first
+    symbolLevels.forEach(l => l.selected = false);
+    
+    // Select the clicked level
+    const level = symbolLevels.find(l => l.id === levelId);
+    if (level) {
+      level.selected = true;
+      selectedLine = { type: 'level', data: level };
+      log(`📏 Selected level at ${level.price.toFixed(2)}`);
+    }
+    
+    saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
+    updateLevelsDisplay();
+    drawLevelsOnChart();
+  }
+
+  function selectTrendline(trendlineId) {
+    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    
+    // Clear all selections first
+    symbolTrendlines.forEach(t => t.selected = false);
+    
+    // Select the clicked trendline
+    const trendline = symbolTrendlines.find(t => t.id === trendlineId);
+    if (trendline) {
+      trendline.selected = true;
+      selectedLine = { type: 'trendline', data: trendline };
+      log(`📐 Selected trendline from ${new Date(trendline.startTime * 1000).toISOString().slice(0, 10)}`);
+    }
+    
+    saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
+    updateTrendlinesDisplay();
+    drawTrendlinesOnChart();
+  }
+
   function removeLevel(levelId) {
     const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
     const filtered = symbolLevels.filter(l => l.id !== levelId);
     saveLevelsForSymbol(currentSymbol, currentTimeframe, filtered);
+    
+    // Clear selection if deleted level was selected
+    if (selectedLine && selectedLine.type === 'level' && selectedLine.data.id === levelId) {
+      selectedLine = null;
+    }
+    
     updateLevelsDisplay();
     drawLevelsOnChart();
   }
@@ -1144,14 +1208,34 @@
     const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
     symbolLevels.forEach(level => {
       const row = document.createElement('div');
-      row.className = 'row';
-      row.innerHTML = `<span>${level.price.toFixed(2)}</span>`;
+      row.className = `row level-item ${level.selected ? 'selected' : ''}`;
+      row.style.cursor = 'pointer';
       
+      // Main content - clickable for selection
+      const content = document.createElement('span');
+      content.className = 'level-content';
+      content.innerHTML = `
+        <span class="level-price">${level.price.toFixed(2)}</span>
+        <span class="level-color" style="background-color: ${level.color || '#60a5fa'}"></span>
+      `;
+      
+      // Click to select level
+      content.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectLevel(level.id);
+      });
+      
+      // Delete button
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'kill';
       deleteBtn.textContent = '✕';
-      deleteBtn.addEventListener('click', () => removeLevel(level.id));
+      deleteBtn.title = 'Delete level';
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeLevel(level.id);
+      });
       
+      row.appendChild(content);
       row.appendChild(deleteBtn);
       container.appendChild(row);
     });
@@ -1165,17 +1249,40 @@
     const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
     symbolTrendlines.forEach(trendline => {
       const row = document.createElement('div');
-      row.className = 'row';
+      row.className = `row trendline-item ${trendline.selected ? 'selected' : ''}`;
+      row.style.cursor = 'pointer';
+      
+      // Main content - clickable for selection
+      const content = document.createElement('span');
+      content.className = 'trendline-content';
       
       const startDate = new Date(trendline.startTime * 1000).toISOString().slice(0, 10);
       const endDate = new Date(trendline.endTime * 1000).toISOString().slice(0, 10);
-      row.innerHTML = `<span>${startDate} → ${endDate}</span>`;
+      const priceRange = `${trendline.startPrice.toFixed(2)} → ${trendline.endPrice.toFixed(2)}`;
       
+      content.innerHTML = `
+        <div class="trendline-dates">${startDate} → ${endDate}</div>
+        <div class="trendline-prices">${priceRange}</div>
+        <span class="trendline-color" style="background-color: ${trendline.color || '#22d3ee'}"></span>
+      `;
+      
+      // Click to select trendline
+      content.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectTrendline(trendline.id);
+      });
+      
+      // Delete button
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'kill';
       deleteBtn.textContent = '✕';
-      deleteBtn.addEventListener('click', () => removeTrendline(trendline.id));
+      deleteBtn.title = 'Delete trendline';
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeTrendline(trendline.id);
+      });
       
+      row.appendChild(content);
       row.appendChild(deleteBtn);
       container.appendChild(row);
     });
@@ -1192,6 +1299,65 @@
       console.warn('[EOD] Error checking visible time range:', error);
       return true; // If error, allow drawing to prevent functional regression
     }
+  }
+
+  // Line extent capping - limits trendline projection based on timeframe
+  function getMaxProjectionTime(startTime, timeframe) {
+    const start = new Date(startTime * 1000);
+    let maxProjection;
+    
+    switch (timeframe.toLowerCase()) {
+      case '1d':
+        // Daily charts: 1 year projection
+        maxProjection = new Date(start);
+        maxProjection.setFullYear(start.getFullYear() + 1);
+        break;
+      case '1w':
+        // Weekly charts: 2 years projection  
+        maxProjection = new Date(start);
+        maxProjection.setFullYear(start.getFullYear() + 2);
+        break;
+      case '1m':
+        // Monthly charts: 5 years projection
+        maxProjection = new Date(start);
+        maxProjection.setFullYear(start.getFullYear() + 5);
+        break;
+      case '4h':
+        // Intraday charts: 6 months projection
+        maxProjection = new Date(start);
+        maxProjection.setMonth(start.getMonth() + 6);
+        break;
+      default:
+        // Default: 1 year
+        maxProjection = new Date(start);
+        maxProjection.setFullYear(start.getFullYear() + 1);
+        break;
+    }
+    
+    return Math.floor(maxProjection.getTime() / 1000);
+  }
+
+  function capTrendlineExtent(trendline) {
+    const maxEndTime = getMaxProjectionTime(trendline.startTime, currentTimeframe);
+    
+    if (trendline.endTime > maxEndTime) {
+      // Calculate the slope to project to the max allowed time
+      const timeDelta = trendline.endTime - trendline.startTime;
+      const priceDelta = trendline.endPrice - trendline.startPrice;
+      const slope = priceDelta / timeDelta;
+      
+      const cappedTimeDelta = maxEndTime - trendline.startTime;
+      const cappedPriceDelta = slope * cappedTimeDelta;
+      
+      return {
+        ...trendline,
+        endTime: maxEndTime,
+        endPrice: trendline.startPrice + cappedPriceDelta,
+        isCapped: true
+      };
+    }
+    
+    return { ...trendline, isCapped: false };
   }
 
   function drawTrendlinesOnChart() {
@@ -1212,34 +1378,45 @@
 
     // --- upsert the rest (no full clear) ---
     for (const t of symbolTrendlines) {
+      // Apply line extent capping to prevent infinite projection
+      const cappedTrendline = capTrendlineExtent(t);
+      
       const inRange =
-        isTimeInVisibleRange(t.startTime) || isTimeInVisibleRange(t.endTime);
+        isTimeInVisibleRange(cappedTrendline.startTime) || isTimeInVisibleRange(cappedTrendline.endTime);
       if (!inRange) continue; // don't expand chart
 
       const lineData = [
-        { time: t.startTime, value: t.startPrice },
-        { time: t.endTime,   value: t.endPrice   },
+        { time: cappedTrendline.startTime, value: cappedTrendline.startPrice },
+        { time: cappedTrendline.endTime,   value: cappedTrendline.endPrice   },
       ];
       if (!lineData.every(p => Number.isFinite(p.time) && Number.isFinite(p.value))) continue;
 
       let rec = trendSeriesById.get(t.id);
       if (!rec) {
+        // Visual styling with capping indicator
+        const lineColor = t.selected ? '#22d3ee' : (cappedTrendline.isCapped ? '#fbbf24' : (t.color || '#f59e0b'));
+        const lineStyle = cappedTrendline.isCapped ? 1 : 0; // Dashed if capped
+        
         const series = chart.addLineSeries({
-          color: t.selected ? '#22d3ee' : (t.color || '#f59e0b'),
+          color: lineColor,
           lineWidth: t.selected ? 5 : 2,
-          lineStyle: 0,
+          lineStyle: lineStyle,
         });
         // stop autoscale influence
         series.applyOptions({ autoscaleInfoProvider: () => null });
-        rec = { series, data: t };
+        rec = { series, data: cappedTrendline };
         trendSeriesById.set(t.id, rec);
       } else {
         // only restyle if selection/color changed
+        const lineColor = t.selected ? '#22d3ee' : (cappedTrendline.isCapped ? '#fbbf24' : (t.color || '#f59e0b'));
+        const lineStyle = cappedTrendline.isCapped ? 1 : 0; // Dashed if capped
+        
         rec.series.applyOptions({
-          color: t.selected ? '#22d3ee' : (t.color || '#f59e0b'),
+          color: lineColor,
           lineWidth: t.selected ? 5 : 2,
+          lineStyle: lineStyle,
         });
-        rec.data = t;
+        rec.data = cappedTrendline;
       }
 
       rec.series.setData(lineData);
@@ -2143,10 +2320,19 @@
       const tf = btn.dataset.tf;
       
       if (tf !== currentTimeframe) {
+        // Handle 4H timeframe limitation with user notification
+        if (tf === '4H') {
+          if (!confirm('⚠️ 4H charts currently show daily data due to limited intraday history from data provider.\n\nWould you like to continue anyway?')) {
+            return; // User cancelled, keep current timeframe
+          }
+          log('4H timeframe selected (showing daily data due to limited intraday history)');
+        } else {
+          log(`${tf} timeframe selected`);
+        }
+        
         currentTimeframe = tf;
         updateTimeframeDisplay();
         loadSymbol(currentSymbol, currentTimeframe);
-        log(`${tf} timeframe selected`);
       }
     });
   });

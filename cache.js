@@ -332,7 +332,10 @@ async function getBarsCached(symbol, days = 600, timeframe = '1d') {
   // Handle different timeframes
   switch (timeframe.toLowerCase()) {
     case '4h':
-      return await getDailyBarsCached(symbol, days, '4h');
+      // TEMPORARY FIX: Tiingo 4H API has limited historical data
+      // Fall back to daily data until we implement proper intraday solution
+      console.log(`⚠️ 4H timeframe temporarily using daily data - Tiingo 4H API has limited history`);
+      return await getDailyBarsCached(symbol, days, '1d');
     
     case '1w':
       // Get daily data and resample to weekly
