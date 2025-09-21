@@ -2,7 +2,7 @@ const path = require('path');
 const express = require('express');
 const fetch = require('node-fetch');   // v2 matches CommonJS
 const cors = require('cors');
-const { getDailyBarsCached } = require('./cache.js');
+const { getBarsCached } = require('./cache.js');
 require('dotenv').config();
 
 const app = express();
@@ -25,7 +25,7 @@ app.get('/healthz', (req, res) => res.json({ ok: true }));
 // Production-grade delta caching now handled by cache.js
 // Eliminates rate limiting issues with intelligent delta updates
 
-// Enhanced data API with delta caching and deep history 
+// Enhanced data API with multi-timeframe support and delta caching
 app.get('/api/data', async (req, res) => {
   try {
     const symbol = (req.query.symbol || 'AAPL').toUpperCase();
@@ -35,8 +35,8 @@ app.get('/api/data', async (req, res) => {
     let days = parseInt(req.query.days || '4000', 10);
     days = Math.min(days, 4000); // Cap at 4000 days for performance
     
-    // Use production-grade delta caching
-    const result = await getDailyBarsCached(symbol, days, '1d');
+    // Use production-grade multi-timeframe caching
+    const result = await getBarsCached(symbol, days, timeframe);
     
     // Transform to frontend format
     const transformedData = result.data.map(bar => ({
@@ -67,8 +67,8 @@ app.get('/eod', async (req, res) => {
     const symbol = (req.query.symbol || 'AAPL').toUpperCase();
     const days = Math.min(parseInt(req.query.days || '600', 10), 2000);
 
-    // Use production-grade delta caching
-    const result = await getDailyBarsCached(symbol, days, '1d');
+    // Use production-grade delta caching (always daily for legacy compatibility)
+    const result = await getBarsCached(symbol, days, '1d');
     
     const data = result.data.map(d => ({
       time: Math.floor(new Date(d.time).getTime() / 1000),
