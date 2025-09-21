@@ -2,1186 +2,460 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>EOD Watch — Minimal</title>
+  <title>EOD Watch — Pro UI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Lightweight Charts -->
-  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <!-- TradingView Lightweight Charts -->
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
   <style>
-    html, body { margin:0; padding:0; background:#0e1a24; color:#cbd5e1; height:100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    #app { display:flex; height:100%; }
-    #sidebar { width:250px; background:#0b1220; border-right:1px solid #1f2937; display:flex; flex-direction:column; }
-    #main { flex:1; display:flex; flex-direction:column; }
-    header { padding:8px 12px; border-bottom:1px solid #1f2937; display:flex; gap:8px; align-items:center; justify-content:space-between; }
-    #current-symbol { font-size:18px; font-weight:600; color:#60a5fa; }
-    #timeframes { display:flex; gap:4px; }
-    .timeframe-btn { background:#374151; color:#cbd5e1; border:0; border-radius:4px; padding:4px 8px; font-size:12px; cursor:pointer; }
-    .timeframe-btn.active { background:#1d4ed8; }
-    #chart { flex:1 1 auto; min-height: 520px; position:relative; }
-    .drawing-mode #chart { cursor: crosshair; }
-    .loading-overlay { position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(14,26,36,0.8); display:none; align-items:center; justify-content:center; color:#60a5fa; font-size:14px; }
-    .loading-overlay.show { display:flex; }
-    #log { padding:6px 12px; font-size:12px; border-top:1px solid #1f2937; color:#9ca3af; }
-    
-    /* Watchlist styles */
-    #watchlist-header { padding:12px; border-bottom:1px solid #1f2937; }
-    #add-symbol { display:flex; gap:4px; margin-bottom:8px; }
-    #new-symbol { flex:1; }
-    #watchlist { flex:1; overflow-y:auto; }
-    .symbol-item { padding:8px 12px; cursor:pointer; border-bottom:1px solid #1e293b; display:flex; justify-content:space-between; align-items:center; }
-    .symbol-item:hover { background:#1e293b; }
-    .symbol-item.active { background:#1d4ed8; }
-    .symbol-name { font-weight:500; }
-    .remove-btn { background:#dc2626; font-size:12px; padding:2px 6px; border-radius:3px; }
-    
-    /* Indicators */
-    #indicators { padding:8px 12px; border-bottom:1px solid #1f2937; }
-    .indicator-toggle { display:flex; align-items:center; gap:6px; margin-bottom:4px; font-size:12px; }
-    .toggle-switch { width:32px; height:16px; background:#374151; border-radius:8px; position:relative; cursor:pointer; }
-    .toggle-switch.active { background:#1d4ed8; }
-    .toggle-knob { width:12px; height:12px; background:#fff; border-radius:50%; position:absolute; top:2px; left:2px; transition:left 0.2s; }
-    .toggle-switch.active .toggle-knob { left:18px; }
-    
-    /* Drawing Tools */
-    #drawing-tools { padding:8px 12px; border-bottom:1px solid #1f2937; }
-    .tool-btn { background:#374151; color:#cbd5e1; border:0; border-radius:4px; padding:6px 8px; font-size:12px; cursor:pointer; margin-right:4px; margin-bottom:4px; }
-    .tool-btn.active { background:#1d4ed8; }
-    
-    /* Levels */
-    #levels { padding:8px 12px; flex:1; overflow-y:auto; }
-    .level-item { display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid #1e293b; }
-    .level-price { font-family:monospace; font-size:11px; color:#60a5fa; }
-    .level-controls { display:flex; gap:4px; }
-    .level-controls button { background:none; border:0; color:#9ca3af; cursor:pointer; padding:2px; }
-    .level-controls button:hover { color:#cbd5e1; }
-    
-    /* Status indicators */
-    .status-dot { width:8px; height:8px; border-radius:50%; margin-right:6px; }
-    .status-connected { background:#10b981; }
-    .status-loading { background:#f59e0b; animation:pulse 1.5s infinite; }
-    .status-error { background:#dc2626; }
-    @keyframes pulse { 0%, 100% { opacity:1; } 50% { opacity:0.5; } }
-    
-    /* Improved hover states */
-    .symbol-item:hover, .tool-btn:hover, .timeframe-btn:hover { transform:translateY(-1px); transition:transform 0.1s; }
-    
-    /* Better visual feedback */
-    .tool-btn.active { box-shadow:0 0 8px rgba(29,78,216,0.4); }
-    
-    /* Line Controls */
-    #line-controls { padding:8px 12px; border-bottom:1px solid #1f2937; display:none; }
-    .color-picker { display:flex; gap:4px; margin:4px 0; }
-    .color-option { width:20px; height:20px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
-    .color-option.active { border-color:#60a5fa; }
-    .color-option:hover { transform:scale(1.1); }
-    
-    /* Responsive improvements */
-    @media (max-width: 768px) {
-      #sidebar { width:200px; }
-      .timeframe-btn { padding:3px 6px; font-size:11px; }
-    }
-    
-    button { background:#1d4ed8; color:#fff; border:0; border-radius:6px; padding:6px 10px; cursor:pointer; }
-    button:disabled { opacity:.5; cursor:not-allowed; }
-    input { background:#0b1220; color:#e5e7eb; border:1px solid #374151; border-radius:6px; padding:6px 8px; }
+    :root{--bg:#0e1a24;--panel:#0f1b2b;--border:#1f2937;--text:#cbd5e1;--muted:#94a3b8;--accent:#3b82f6;--good:#4ade80;--bad:#ef4444;--warn:#f59e0b}
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    header{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px solid var(--border);background:linear-gradient(#0f1b2b,#0e1a24)}
+    input,button{background:#0b1522;border:1px solid #22314a;color:var(--text);border-radius:8px;padding:8px 10px}
+    button{cursor:pointer}
+    button.primary{background:var(--accent);border-color:var(--accent);color:white}
+    .btn-toggle.active{outline:2px solid var(--accent)}
+    .toolbar-sep{width:1px;height:24px;background:var(--border);margin:0 6px}
+    main{display:grid;grid-template-columns:1fr 320px;gap:10px;padding:10px;height:calc(100% - 56px)}
+    #board{grid-column:1/3;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px}
+    #board-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+    .mini{position:relative;background:#0f1b2b;border:1px solid var(--border);border-radius:8px;height:160px;overflow:hidden}
+    .mini .title{position:absolute;left:6px;top:4px;font-size:12px;color:var(--muted)}
+    .mini .enlarge{position:absolute;right:4px;top:4px;font-size:12px;padding:2px 6px}
+    #chart{background:var(--panel);border:1px solid var(--border);border-radius:10px;min-height:520px}
+    aside{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:10px;overflow:auto}
+    h3{margin:.25rem 0 .5rem 0;font-size:13px;color:var(--muted)}
+    .list .row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dashed #20304a}
+    .kill{background:transparent;border:none;color:#f87171;cursor:pointer;font-size:16px}
+    .status{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#0b1524;border:1px solid #22314a;border-radius:8px;padding:8px;white-space:pre-wrap;min-height:38px}
+    .chips{display:flex;gap:6px;flex-wrap:wrap}
+    .chip{padding:3px 6px;border-radius:999px;border:1px solid var(--border);font-size:12px}
+    .chip.good{border-color:#236a4d;color:#9ce8c0}
+    .chip.bad{border-color:#632828;color:#f3b0b0}
+    .chip.warn{border-color:#5a4517;color:#f6d399}
+    /* Modal */
+    #modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.84);z-index:50;align-items:center;justify-content:center}
+    #modal .box{position:relative;width:92vw;height:86vh;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    #modal .close{position:absolute;right:10px;top:8px;z-index:2}
   </style>
 </head>
 <body>
-<div id="app">
-  <div id="sidebar">
-    <div id="watchlist-header">
-      <h3 style="margin:0 0 8px 0; font-size:14px; color:#9ca3af;">WATCHLIST</h3>
-      <div id="add-symbol">
-        <input id="new-symbol" placeholder="Add symbol..." />
-        <button id="add-btn">+</button>
+  <header>
+    <input id="ticker" placeholder="AAPL" value="AAPL" />
+    <button id="btnLoad" class="primary">Load</button>
+    <div class="toolbar-sep"></div>
+    <button class="tf btn-toggle" data-tf="4H">4H</button>
+    <button class="tf btn-toggle active" data-tf="1D">1D</button>
+    <button class="tf btn-toggle" data-tf="1W">1W</button>
+    <button class="tf btn-toggle" data-tf="1M">1M</button>
+    <div class="toolbar-sep"></div>
+    <button id="toolLevel" class="btn-toggle">+ Level</button>
+    <button id="toolTrend" class="btn-toggle">+ Trend (2-click)</button>
+    <div class="toolbar-sep"></div>
+    <button id="toggleEMA" class="btn-toggle">EMA200</button>
+    <span id="topStatus" style="margin-left:6px;color:var(--muted)">Ready</span>
+  </header>
+
+  <main>
+    <!-- 10-chart board -->
+    <section id="board">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="color:var(--muted);font-size:13px">BOARD (Top 10)</div>
+        <div id="boardHint" style="color:var(--muted);font-size:12px">Click mini to load main · ⤢ to enlarge</div>
       </div>
-    </div>
-    <div id="watchlist"></div>
-    <div id="indicators">
-      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">INDICATORS</h4>
-      <div class="indicator-toggle">
-        <div class="toggle-switch active" id="ema-toggle">
-          <div class="toggle-knob"></div>
-        </div>
-        <span>EMA(200)</span>
+      <div id="board-grid"></div>
+    </section>
+
+    <!-- main chart -->
+    <section id="chart"></section>
+
+    <!-- side panel -->
+    <aside>
+      <div>
+        <h3>Signals</h3>
+        <div id="chips" class="chips"></div>
       </div>
-      <div class="indicator-toggle">
-        <div class="toggle-switch" id="bb-toggle">
-          <div class="toggle-knob"></div>
-        </div>
-        <span>BB(20,2)</span>
+      <div>
+        <h3>Levels</h3>
+        <div id="levels" class="list"></div>
       </div>
-    </div>
-    <div id="drawing-tools">
-      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">DRAWING</h4>
-      <button class="tool-btn" id="level-tool">Level</button>
-      <button class="tool-btn" id="trendline-tool">Trendline</button>
-      <button class="tool-btn" id="clear-all">Clear</button>
-    </div>
-    <div id="line-controls">
-      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">LINE OPTIONS</h4>
-      <div class="color-picker">
-        <div class="color-option" style="background:#60a5fa" data-color="#60a5fa" title="Blue"></div>
-        <div class="color-option" style="background:#f59e0b" data-color="#f59e0b" title="Orange"></div>
-        <div class="color-option" style="background:#10b981" data-color="#10b981" title="Green"></div>
-        <div class="color-option" style="background:#ef4444" data-color="#ef4444" title="Red"></div>
-        <div class="color-option" style="background:#8b5cf6" data-color="#8b5cf6" title="Purple"></div>
-        <div class="color-option" style="background:#f97316" data-color="#f97316" title="Yellow"></div>
+      <div>
+        <h3>Trendlines</h3>
+        <div id="trends" class="list"></div>
       </div>
-      <button class="tool-btn" id="delete-line" style="background:#dc2626; width:100%; margin-top:4px;">Delete Selected Line</button>
-    </div>
-    <div id="levels">
-      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">LEVELS</h4>
-      <div id="levels-list"></div>
+      <div>
+        <h3>Log</h3>
+        <div id="log" class="status">—</div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- fullscreen modal -->
+  <div id="modal">
+    <div class="box">
+      <button class="close">✕</button>
+      <div id="modalCanvas" style="position:absolute;inset:0"></div>
     </div>
   </div>
-  <div id="main">
-    <header>
-      <div style="display:flex; align-items:center;">
-        <div class="status-dot status-connected" id="status-dot"></div>
-        <div id="current-symbol">AAPL</div>
-      </div>
-      <div id="timeframes">
-        <button class="timeframe-btn active" data-tf="1D">1D</button>
-        <button class="timeframe-btn" data-tf="1W" title="Weekly aggregation (Phase 3)">1W</button>
-        <button class="timeframe-btn" data-tf="1M" title="Monthly aggregation (Phase 3)">1M</button>
-      </div>
-    </header>
-    <div id="chart">
-      <div class="loading-overlay" id="loading-overlay">
-        <div>Loading chart data...</div>
-      </div>
-    </div>
-    <div id="log">—</div>
-  </div>
-</div>
 
 <script>
-(function () {
-  const API = ''; // same origin
-  const $ = s => document.querySelector(s);
-  const $$ = s => document.querySelectorAll(s);
-  const log = m => { $('#log').textContent = m; console.log('[EOD]', m); };
+(() => {
+  // --- Config ---
+  const API = ''; // same-origin Express proxy. If serving UI elsewhere, set 'http://localhost:3000'
+  const DEFAULT_WATCHLIST = ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA','META','AMD','GOOGL','IWM'];
 
-  // ---- Application State
-  let watchlist = JSON.parse(localStorage.getItem('eod-watchlist') || '["AAPL", "META", "TSLA", "GOOGL", "MSFT"]');
-  let currentSymbol = localStorage.getItem('eod-current-symbol') || 'AAPL';
-  let indicators = JSON.parse(localStorage.getItem('eod-indicators') || '{"ema200": true, "bb20": false}');
-  let levels = JSON.parse(localStorage.getItem('eod-levels') || '{}'); // symbol -> levels mapping
-  let trendlines = JSON.parse(localStorage.getItem('eod-trendlines') || '{}'); // symbol -> trendlines mapping
+  // --- Shorthands ---
+  const $ = (s)=>document.querySelector(s);
+  const $$ = (s)=>document.querySelectorAll(s);
+  const log = (m)=>{ $('#log').textContent = m; console.log('[EOD]', m); };
+  const chip = (txt, cls)=>{ const d=document.createElement('div'); d.className='chip '+(cls||''); d.textContent=txt; return d; };
+
+  // --- State ---
+  let currentSymbol = 'AAPL';
+  let currentTF = '1D';
+  let dailyBars = [];   // raw daily from /eod
+  let tfBars = [];      // current timeframe bars
   let drawingMode = false;
-  let drawingTool = 'level'; // 'level' or 'trendline'
-  let trendlineStart = null; // for 2-point trendline drawing
-  let previewTrendline = null; // preview line while drawing
-  let currentLevels = []; // active level lines on chart
-  let currentTrendlines = []; // active trendlines on chart
-  let selectedLine = null; // currently selected line for editing
-  let lineHandles = []; // visual handles for selected line
-  let isLineSelected = false; // flag to track selection state
+  let drawingTool = null;     // 'level' | 'trendline'
+  let trendStart = null;      // {time, price}
+  let emaOn = false;
 
-  // ---- Chart init
-  const chart = LightweightCharts.createChart(document.getElementById('chart'), {
-    autoSize: true,
-    layout: { background: { color: '#0e1a24' }, textColor: '#cbd5e1' },
-    grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
-    rightPriceScale: { borderColor: '#334155' },
-    timeScale: { borderColor: '#334155' }
+  // Persisted drawings
+  function keyLevels(sym, tf) { return `eodwatch:${sym}:${tf}:levels`; }
+  function keyTrends(sym, tf) { return `eodwatch:${sym}:${tf}:trends`; }
+  function loadLevels(sym, tf){ try { return JSON.parse(localStorage.getItem(keyLevels(sym,tf))||'[]'); } catch { return []; } }
+  function loadTrends(sym, tf){ try { return JSON.parse(localStorage.getItem(keyTrends(sym,tf))||'[]'); } catch { return []; } }
+  function saveLevels(sym, tf, arr){ localStorage.setItem(keyLevels(sym,tf), JSON.stringify(arr)); }
+  function saveTrends(sym, tf, arr){ localStorage.setItem(keyTrends(sym,tf), JSON.stringify(arr)); }
+
+  let levels = [];        // [{id,price,color}]
+  let trends = [];        // [{id,startTime,startPrice,endTime,endPrice,color}]
+  let priceLines = [];    // live chart price lines
+  let trendSeries = [];   // live chart line series
+
+  // --- Chart bootstrap (main) ---
+  const chart = LightweightCharts.createChart($('#chart'), {
+    layout:{ background:{ color:'#0f1b2b' }, textColor:'#cbd5e1' },
+    rightPriceScale:{ borderVisible:false },
+    timeScale:{ borderColor:'#22314a' },
+    grid:{ vertLines:{ color:'#132032' }, horzLines:{ color:'#132032' } },
+    autoSize:true
   });
-  const candleSeries = chart.addCandlestickSeries();
-  // indicators
-  const emaSeries = chart.addLineSeries({ color: '#60a5fa', lineWidth: 2 });
-  const bbUpperSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
-  const bbMiddleSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1, lineStyle: 2 });
-  const bbLowerSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
+  const candle = chart.addCandlestickSeries({
+    upColor: getComputedStyle(document.documentElement).getPropertyValue('--good').trim() || '#4ade80',
+    downColor: getComputedStyle(document.documentElement).getPropertyValue('--bad').trim() || '#ef4444',
+    wickUpColor:'#4ade80', wickDownColor:'#ef4444', borderVisible:false
+  });
+  const emaSeries = chart.addLineSeries({ color:'#60a5fa', lineWidth:2 });
+  let bbUpperSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
+  let bbMiddleSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
+  let bbLowerSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
 
-  // ---- Indicator calculations
-  function ema(values, period) {
-    if (values.length === 0) return [];
-    const k = 2 / (period + 1);
-    let emaVal = values[0].close;
-    const out = [{ time: values[0].time, value: emaVal }];
-    for (let i = 1; i < values.length; i++) {
-      emaVal = values[i].close * k + emaVal * (1 - k);
-      out.push({ time: values[i].time, value: emaVal });
+  // --- Indicators ---
+  function emaFromBars(bars, period=200){
+    if (!bars?.length) return [];
+    const k = 2/(period+1);
+    let e = bars[0].close;
+    const out = [{ time: bars[0].time, value: e }];
+    for (let i=1;i<bars.length;i++){
+      e = bars[i].close*k + e*(1-k);
+      out.push({ time: bars[i].time, value: e });
     }
     return out;
   }
-
-  function bollingerBands(values, period, stdDev) {
-    if (!values || values.length < period) return { upper: [], middle: [], lower: [] };
-    
-    const upper = [], middle = [], lower = [];
-    
-    for (let i = period - 1; i < values.length; i++) {
-      // Calculate SMA for middle band
-      const slice = values.slice(i - period + 1, i + 1);
-      
-      // Ensure all values are valid numbers
-      const validSlice = slice.filter(bar => bar && typeof bar.close === 'number' && !isNaN(bar.close));
-      if (validSlice.length !== slice.length) continue; // Skip if any invalid data
-      
-      const sma = validSlice.reduce((sum, bar) => sum + bar.close, 0) / validSlice.length;
-      
-      // Calculate standard deviation
-      const variance = validSlice.reduce((sum, bar) => sum + Math.pow(bar.close - sma, 2), 0) / validSlice.length;
-      const std = Math.sqrt(variance);
-      
-      const time = values[i].time;
-      if (time && !isNaN(sma) && !isNaN(std)) {
-        middle.push({ time, value: sma });
-        upper.push({ time, value: sma + (stdDev * std) });
-        lower.push({ time, value: sma - (stdDev * std) });
-      }
+  function sma(arr, n){
+    const out=[]; let sum=0;
+    for (let i=0;i<arr.length;i++){
+      sum+=arr[i];
+      if(i>=n) sum-=arr[i-n];
+      if(i>=n-1) out.push(sum/n);
+      else out.push(null);
     }
-    
-    return { upper, middle, lower };
+    return out;
   }
-
-  async function fetchBars(symbol, days = 600) {
-    const url = `${API}/eod?symbol=${encodeURIComponent(symbol)}&days=${days}`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const json = await r.json();
-    // Tiingo adapter -> Lightweight Charts
-    return (json.data || []).map(b => ({
-      time: b.time, open: b.open, high: b.high, low: b.low, close: b.close
-    }));
-  }
-
-  async function loadSymbol(sym) {
-    try {
-      // Show loading state
-      $('#loading-overlay').classList.add('show');
-      $('#status-dot').className = 'status-dot status-loading';
-      log(`Loading ${sym}…`);
-      
-      const bars = await fetchBars(sym, 600);
-      if (!bars.length) { 
-        log('No data returned.'); 
-        $('#status-dot').className = 'status-dot status-error';
-        return; 
-      }
-      
-      // Update chart
-      candleSeries.setData(bars);
-      
-      // Update indicators based on toggles
-      if (indicators.ema200) {
-        const ema200 = ema(bars, 200);
-        emaSeries.setData(ema200);
-      } else {
-        emaSeries.setData([]);
-      }
-      
-      if (indicators.bb20) {
-        const bb = bollingerBands(bars, 20, 2);
-        bbUpperSeries.setData(bb.upper);
-        bbMiddleSeries.setData(bb.middle);
-        bbLowerSeries.setData(bb.lower);
-      } else {
-        bbUpperSeries.setData([]);
-        bbMiddleSeries.setData([]);
-        bbLowerSeries.setData([]);
-      }
-      
-      chart.timeScale().fitContent();
-      currentSymbol = sym;
-      $('#current-symbol').textContent = sym;
-      localStorage.setItem('eod-current-symbol', sym);
-      updateWatchlistDisplay();
-      updateLevelsDisplay();
-      drawLevelsOnChart();
-      updateTrendlinesDisplay();
-      drawTrendlinesOnChart();
-      
-      // Update status to connected
-      $('#status-dot').className = 'status-dot status-connected';
-      log(`Loaded ${sym}: ${bars.length} bars`);
-    } catch (e) {
-      log('Load failed: ' + e.message);
-      $('#status-dot').className = 'status-dot status-error';
-    } finally {
-      // Hide loading state
-      $('#loading-overlay').classList.remove('show');
+  function bollingerBands(bars, period=20, mult=2){
+    const closes = bars.map(b=>b.close);
+    const mid = sma(closes, period);
+    const outU=[], outM=[], outL=[];
+    for (let i=0;i<bars.length;i++){
+      const m = mid[i];
+      if (m==null){ outU.push(null); outM.push(null); outL.push(null); continue; }
+      const win = closes.slice(Math.max(0,i-period+1), i+1);
+      const mean = m;
+      const variance = win.reduce((s,v)=>s+Math.pow(v-mean,2),0)/win.length;
+      const sd = Math.sqrt(variance);
+      outU.push({ time: bars[i].time, value: mean + mult*sd });
+      outM.push({ time: bars[i].time, value: mean });
+      outL.push({ time: bars[i].time, value: mean - mult*sd });
     }
+    return { upper: outU.filter(Boolean), middle: outM.filter(Boolean), lower: outL.filter(Boolean) };
   }
 
-  // ---- Watchlist Management
-  function saveWatchlist() {
-    localStorage.setItem('eod-watchlist', JSON.stringify(watchlist));
+  // --- Resampling (weekly/monthly) ---
+  function resampleWeekly(daily){
+    if (!daily.length) return [];
+    const out=[]; let cur=null, wk=null;
+    const isoWeek = (t)=>{ const d=new Date(t*1000); d.setUTCHours(0,0,0,0);
+      const day=(d.getUTCDay()+6)%7; d.setUTCDate(d.getUTCDate()-day+3);
+      const firstThu=new Date(Date.UTC(d.getUTCFullYear(),0,4));
+      const week=1+Math.round(((d-firstThu)/86400000-3+((firstThu.getUTCDay()+6)%7))/7);
+      return d.getUTCFullYear()+"-"+week; };
+    for(const b of daily){ const w=isoWeek(b.time);
+      if(w!==wk){ if(cur) out.push(cur); cur={...b}; wk=w; }
+      else { cur.high=Math.max(cur.high,b.high); cur.low=Math.min(cur.low,b.low); cur.close=b.close; }
+    } if(cur) out.push(cur); return out;
+  }
+  function resampleMonthly(daily){
+    if (!daily.length) return [];
+    const out=[]; let cur=null, key=null;
+    const mKey=(t)=>{ const d=new Date(t*1000); return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,'0'); };
+    for(const b of daily){ const k=mKey(b.time);
+      if(k!==key){ if(cur) out.push(cur); cur={...b}; key=k; }
+      else { cur.high=Math.max(cur.high,b.high); cur.low=Math.min(cur.low,b.low); cur.close=b.close; }
+    } if(cur) out.push(cur); return out;
   }
 
-  function addSymbol() {
-    const symbol = $('#new-symbol').value.trim().toUpperCase();
-    // Validate symbol format (alphanumeric, dots, dashes only)
-    if (symbol && /^[A-Z0-9\.\-]{1,10}$/.test(symbol) && !watchlist.includes(symbol)) {
-      watchlist.push(symbol);
-      saveWatchlist();
-      updateWatchlistDisplay();
-      $('#new-symbol').value = '';
-    } else if (symbol && !watchlist.includes(symbol)) {
-      log('Invalid symbol format. Use letters, numbers, dots, and dashes only.');
-    }
+  // --- Drawings: Levels ---
+  function refreshLevelsPanel(){
+    const box=$('#levels'); box.innerHTML='';
+    levels.forEach((lv, idx)=>{
+      const row=document.createElement('div'); row.className='row';
+      row.innerHTML=`<span>${lv.price.toFixed(2)}</span>`;
+      const del=document.createElement('button'); del.className='kill'; del.textContent='✕';
+      del.onclick=()=>{ levels.splice(idx,1); saveLevels(currentSymbol,currentTF,levels); drawLevels(); refreshLevelsPanel(); };
+      row.appendChild(del); box.appendChild(row);
+    });
   }
-
-  function removeSymbol(symbol) {
-    watchlist = watchlist.filter(s => s !== symbol);
-    saveWatchlist();
-    updateWatchlistDisplay();
-    if (currentSymbol === symbol && watchlist.length > 0) {
-      loadSymbol(watchlist[0]);
-    }
-  }
-
-  function updateWatchlistDisplay() {
-    const container = $('#watchlist');
-    container.innerHTML = ''; // Clear existing content
-    
-    watchlist.forEach(symbol => {
-      const item = document.createElement('div');
-      item.className = `symbol-item ${symbol === currentSymbol ? 'active' : ''}`;
-      item.dataset.symbol = symbol;
-      
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'symbol-name';
-      nameSpan.textContent = symbol; // Safe text content
-      
-      const removeBtn = document.createElement('button');
-      removeBtn.className = 'remove-btn';
-      removeBtn.textContent = '×';
-      removeBtn.dataset.symbol = symbol;
-      removeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        removeSymbol(e.target.dataset.symbol);
+  function drawLevels(){
+    // remove old lines
+    priceLines.forEach(pl=>{ try{candle.removePriceLine(pl);}catch{} });
+    priceLines=[];
+    // add current
+    levels.forEach(lv=>{
+      const line=candle.createPriceLine({
+        price:lv.price, color:lv.color||'#60a5fa', lineWidth:2,
+        lineStyle:LightweightCharts.LineStyle.Dashed, axisLabelVisible:true, title:`${lv.price.toFixed(2)}`
       });
-      
-      item.appendChild(nameSpan);
-      item.appendChild(removeBtn);
-      container.appendChild(item);
+      priceLines.push(line);
     });
   }
-
-  function updateIndicatorToggles() {
-    $('#ema-toggle').className = indicators.ema200 ? 'toggle-switch active' : 'toggle-switch';
-    $('#bb-toggle').className = indicators.bb20 ? 'toggle-switch active' : 'toggle-switch';
+  function addLevel(price){
+    levels.push({ id:'L'+Date.now(), price, color:'#60a5fa' });
+    saveLevels(currentSymbol,currentTF,levels);
+    drawLevels(); refreshLevelsPanel();
   }
 
-  function saveIndicators() {
-    localStorage.setItem('eod-indicators', JSON.stringify(indicators));
-  }
-
-  function saveLevels() {
-    localStorage.setItem('eod-levels', JSON.stringify(levels));
-  }
-
-  function saveTrendlines() {
-    localStorage.setItem('eod-trendlines', JSON.stringify(trendlines));
-  }
-
-  function getTrendlinesForSymbol(symbol) {
-    return trendlines[symbol] || [];
-  }
-
-  function addTrendline(startTime, startPrice, endTime, endPrice) {
-    if (!trendlines[currentSymbol]) trendlines[currentSymbol] = [];
-    const trendlineId = Date.now().toString();
-    const trendline = {
-      id: trendlineId,
-      startTime: startTime,
-      startPrice: startPrice,
-      endTime: endTime,
-      endPrice: endPrice,
-      symbol: currentSymbol,
-      color: '#f59e0b', // default color
-      selected: false
-    };
-    trendlines[currentSymbol].push(trendline);
-    saveTrendlines();
-    updateTrendlinesDisplay();
-    drawTrendlinesOnChart();
-    return trendline;
-  }
-
-  function removeTrendline(trendlineId) {
-    if (trendlines[currentSymbol]) {
-      trendlines[currentSymbol] = trendlines[currentSymbol].filter(t => t.id !== trendlineId);
-      saveTrendlines();
-      updateTrendlinesDisplay();
-      drawTrendlinesOnChart();
-    }
-  }
-
-  function clearAllTrendlines() {
-    if (trendlines[currentSymbol]) {
-      trendlines[currentSymbol] = [];
-      saveTrendlines();
-      updateTrendlinesDisplay();
-      drawTrendlinesOnChart();
-    }
-  }
-
-  function getLevelsForSymbol(symbol) {
-    return levels[symbol] || [];
-  }
-
-  function addLevel(price) {
-    if (!levels[currentSymbol]) levels[currentSymbol] = [];
-    const levelId = Date.now().toString();
-    const level = {
-      id: levelId,
-      price: price,
-      symbol: currentSymbol,
-      color: '#60a5fa', // default color
-      selected: false
-    };
-    levels[currentSymbol].push(level);
-    saveLevels();
-    updateLevelsDisplay();
-    drawLevelsOnChart();
-    return level;
-  }
-
-  function removeLevel(levelId) {
-    if (levels[currentSymbol]) {
-      levels[currentSymbol] = levels[currentSymbol].filter(l => l.id !== levelId);
-      saveLevels();
-      updateLevelsDisplay();
-      drawLevelsOnChart();
-    }
-  }
-
-  function clearAllLevels() {
-    if (levels[currentSymbol]) {
-      levels[currentSymbol] = [];
-      saveLevels();
-      updateLevelsDisplay();
-      drawLevelsOnChart();
-    }
-  }
-
-  function updateLevelsDisplay() {
-    const container = $('#levels-list');
-    container.innerHTML = '';
-    
-    const symbolLevels = getLevelsForSymbol(currentSymbol);
-    symbolLevels.forEach(level => {
-      const item = document.createElement('div');
-      item.className = 'level-item';
-      
-      const priceSpan = document.createElement('span');
-      priceSpan.className = 'level-price';
-      priceSpan.textContent = level.price.toFixed(2);
-      
-      const controls = document.createElement('div');
-      controls.className = 'level-controls';
-      
-      const deleteBtn = document.createElement('button');
-      deleteBtn.textContent = '×';
-      deleteBtn.title = 'Delete level';
-      deleteBtn.addEventListener('click', () => removeLevel(level.id));
-      
-      controls.appendChild(deleteBtn);
-      item.appendChild(priceSpan);
-      item.appendChild(controls);
-      container.appendChild(item);
+  // --- Drawings: Trendlines ---
+  function refreshTrendsPanel(){
+    const box=$('#trends'); box.innerHTML='';
+    trends.forEach((tr, idx)=>{
+      const row=document.createElement('div'); row.className='row';
+      const t1=new Date(tr.startTime*1000).toISOString().slice(0,10);
+      const t2=new Date(tr.endTime*1000).toISOString().slice(0,10);
+      row.innerHTML=`<span>${t1} → ${t2}</span>`;
+      const del=document.createElement('button'); del.className='kill'; del.textContent='✕';
+      del.onclick=()=>{ trends.splice(idx,1); saveTrends(currentSymbol,currentTF,trends); drawTrends(); refreshTrendsPanel(); };
+      row.appendChild(del); box.appendChild(row);
     });
   }
-
-  function updateTrendlinesDisplay() {
-    // For now, we'll display trendlines in the levels list
-    // A future enhancement could be a separate trendlines panel
-  }
-
-  function drawTrendlinesOnChart() {
-    // Clear existing trendlines
-    currentTrendlines.forEach(line => chart.removeSeries(line));
-    currentTrendlines = [];
-    
-    // Draw current symbol's trendlines
-    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol);
-    
-    // Sanitize and validate trendlines before drawing
-    const validTrendlines = symbolTrendlines.filter(t => 
-      t && 
-      t.startTime != null && 
-      t.endTime != null && 
-      Number.isFinite(t.startPrice) && 
-      Number.isFinite(t.endPrice)
-    );
-    
-    validTrendlines.forEach((trendline, index) => {
-      try {
-        const trendlineSeries = chart.addLineSeries({
-          color: trendline.selected ? '#22d3ee' : (trendline.color || '#f59e0b'),
-          lineWidth: trendline.selected ? 5 : 2, // Much thicker when selected
-          lineStyle: 0
-        });
-        
-        // Create line data with validated start and end points
-        const lineData = [
-          { time: trendline.startTime, value: trendline.startPrice },
-          { time: trendline.endTime, value: trendline.endPrice }
-        ];
-        
-        // Defensive check before setData
-        if (lineData.every(point => point.time != null && Number.isFinite(point.value))) {
-          trendlineSeries.setData(lineData);
-          // Store reference to trendline data for selection
-          trendlineSeries._trendlineData = trendline;
-          trendlineSeries._trendlineIndex = index;
-          currentTrendlines.push(trendlineSeries);
-        } else {
-          console.warn('[EOD] Skipped invalid trendline data:', lineData);
-          chart.removeSeries(trendlineSeries);
-        }
-      } catch (error) {
-        console.error('[EOD] Error drawing trendline:', error, trendline);
-      }
-    });
-    
-    // Clean up invalid trendlines from storage if we filtered any out
-    if (validTrendlines.length !== symbolTrendlines.length) {
-      if (!trendlines[currentSymbol]) trendlines[currentSymbol] = [];
-      trendlines[currentSymbol] = validTrendlines;
-      saveTrendlines();
-      log(`Cleaned up ${symbolTrendlines.length - validTrendlines.length} invalid trendlines`);
-    }
-  }
-
-  function drawLevelsOnChart() {
-    // Clear existing level lines
-    currentLevels.forEach(line => candleSeries.removePriceLine(line));
-    currentLevels = [];
-    
-    // Draw current symbol's levels
-    const symbolLevels = getLevelsForSymbol(currentSymbol);
-    symbolLevels.forEach((level, index) => {
-      const priceLine = {
-        price: level.price,
-        color: level.selected ? '#22d3ee' : (level.color || '#60a5fa'),
-        lineWidth: level.selected ? 5 : 2, // Much thicker when selected
-        lineStyle: 0, // solid line, thicker
-        axisLabelVisible: true,
-        title: `Level ${level.price.toFixed(2)}`
-      };
-      const line = candleSeries.createPriceLine(priceLine);
-      line._levelData = level;
-      line._levelIndex = index;
-      currentLevels.push(line);
+  function drawTrends(){
+    trendSeries.forEach(s=>{ try{chart.removeSeries(s);}catch{} });
+    trendSeries=[];
+    trends.forEach(tr=>{
+      const s=chart.addLineSeries({ color: tr.color||'#f59e0b', lineWidth:2 });
+      s.setData([{time:tr.startTime, value:tr.startPrice},{time:tr.endTime, value:tr.endPrice}]);
+      trendSeries.push(s);
     });
   }
-
-  // ---- Chart Interaction
-  function setupChartInteraction() {
-    chart.subscribeClick(param => {
-      if (param.point) {
-        const price = candleSeries.coordinateToPrice(param.point.y);
-        const time = chart.timeScale().coordinateToTime(param.point.x);
-        
-        if (price !== null && !isNaN(price) && time !== null && time !== undefined) {
-          // Check if clicking on existing line for selection (when not in drawing mode)
-          if (!drawingMode) {
-            const clickedLine = findLineNearClick(param.point.x, param.point.y);
-            if (clickedLine) {
-              selectLine(clickedLine);
-              log(`Selected ${clickedLine.type} line`);
-              return;
-            } else {
-              // Clicked on empty space - deselect any selected line
-              deselectLine();
-            }
-          }
-          
-          // Handle drawing mode clicks
-          if (drawingMode) {
-            if (drawingTool === 'level') {
-              addLevel(price);
-              // Auto-disable drawing mode after adding level
-              drawingMode = false;
-              $('#level-tool').classList.remove('active');
-              log(`Added level at ${price.toFixed(2)}`);
-            } else if (drawingTool === 'trendline') {
-              if (!trendlineStart) {
-                // First click - set start point and enable preview
-                trendlineStart = { time, price };
-                enableTrendlinePreview();
-                log('Click second point to complete trendline');
-              } else {
-                // Second click - complete trendline
-                disableTrendlinePreview();
-                addTrendline(trendlineStart.time, trendlineStart.price, time, price);
-                log(`Added trendline from ${trendlineStart.price.toFixed(2)} to ${price.toFixed(2)}`);
-                
-                // Reset for next trendline
-                trendlineStart = null;
-                drawingMode = false;
-                $('#trendline-tool').classList.remove('active');
-              }
-            }
-          }
-        }
-      }
-    });
-    
-    // Mouse move handler for live trendline preview
-    chart.subscribeCrosshairMove(param => {
-      if (drawingMode && drawingTool === 'trendline' && trendlineStart && param.point) {
-        const price = candleSeries.coordinateToPrice(param.point.y);
-        const time = chart.timeScale().coordinateToTime(param.point.x);
-        
-        if (price !== null && !isNaN(price) && time !== null && time !== undefined) {
-          updateTrendlinePreview(time, price);
-        }
-      }
-    });
-  }
-  
-  function enableTrendlinePreview() {
-    if (!previewTrendline) {
-      previewTrendline = chart.addLineSeries({
-        color: '#60a5fa',
-        lineWidth: 1,
-        lineStyle: 2, // dashed for preview
-        priceLineVisible: false,
-        lastValueVisible: false
-      });
-    }
-  }
-  
-  function updateTrendlinePreview(endTime, endPrice) {
-    if (previewTrendline && trendlineStart) {
-      const lineData = [
-        { time: trendlineStart.time, value: trendlineStart.price },
-        { time: endTime, value: endPrice }
-      ];
-      previewTrendline.setData(lineData);
-    }
-  }
-  
-  function disableTrendlinePreview() {
-    if (previewTrendline) {
-      try {
-        chart.removeSeries(previewTrendline);
-      } catch (error) {
-        console.log('[EOD] Preview series already removed or invalid');
-      }
-      previewTrendline = null;
-    }
-  }
-  
-  function findLineNearClick(x, y) {
-    const tolerance = 8; // pixels
-    
-    // Check trendlines first
-    for (let series of currentTrendlines) {
-      if (series._trendlineData && isPointNearTrendline(x, y, series._trendlineData, tolerance)) {
-        return {
-          type: 'trendline',
-          series: series,
-          data: series._trendlineData,
-          index: series._trendlineIndex
-        };
-      }
-    }
-    
-    // Check levels
-    const clickPrice = candleSeries.coordinateToPrice(y);
-    const tolPrice = Math.abs(candleSeries.coordinateToPrice(y + tolerance) - candleSeries.coordinateToPrice(y));
-    for (let i=0;i<currentLevels.length;i++) {
-      const levelData = getLevelsForSymbol(currentSymbol)[i];
-      if (levelData && Math.abs(clickPrice - levelData.price) < tolPrice) {
-        return { type:'level', series: currentLevels[i], data: levelData, index: i };
-      }
-    }
-    
-    return null;
-  }
-  
-  function isPointNearTrendline(x, y, trendlineData, tolerance) {
-    // Convert trendline coordinates to pixels
-    const startX = chart.timeScale().timeToCoordinate(trendlineData.startTime);
-    const startY = candleSeries.priceToCoordinate(trendlineData.startPrice);
-    const endX = chart.timeScale().timeToCoordinate(trendlineData.endTime);
-    const endY = candleSeries.priceToCoordinate(trendlineData.endPrice);
-    
-    if (startX === null || startY === null || endX === null || endY === null) {
-      return false;
-    }
-    
-    // Calculate distance from point to line segment
-    const distance = distanceToLineSegment(x, y, startX, startY, endX, endY);
-    return distance <= tolerance;
-  }
-  
-  function distanceToLineSegment(x, y, x1, y1, x2, y2) {
-    const A = x - x1;
-    const B = y - y1;
-    const C = x2 - x1;
-    const D = y2 - y1;
-    
-    const dot = A * C + B * D;
-    const lenSq = C * C + D * D;
-    let param = -1;
-    
-    if (lenSq !== 0) {
-      param = dot / lenSq;
-    }
-    
-    let xx, yy;
-    if (param < 0) {
-      xx = x1;
-      yy = y1;
-    } else if (param > 1) {
-      xx = x2;
-      yy = y2;
-    } else {
-      xx = x1 + param * C;
-      yy = y1 + param * D;
-    }
-    
-    const dx = x - xx;
-    const dy = y - yy;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-  
-  function selectLine(lineInfo) {
-    try {
-      // Clear previous selections
-      getTrendlinesForSymbol(currentSymbol).forEach(t => t.selected = false);
-      getLevelsForSymbol(currentSymbol).forEach(l => l.selected = false);
-
-      selectedLine = lineInfo;
-      isLineSelected = true;
-      if (lineInfo.type === 'trendline') {
-        lineInfo.data.selected = true;
-        saveTrendlines();
-        drawTrendlinesOnChart();
-      } else if (lineInfo.type === 'level') {
-        lineInfo.data.selected = true;
-        saveLevels();
-        drawLevelsOnChart();
-      }
-      showLineControls(lineInfo);
-      updateLineHandles();
-      log(`✅ SELECTED ${lineInfo.type.toUpperCase()}: Click color buttons to change, X to delete, or drag handles to resize`);
-    } catch (error) {
-      console.error('[EOD] Selection error:', error);
-    }
+  function addTrend(start, end){
+    trends.push({ id:'T'+Date.now(), startTime:start.time, startPrice:start.price, endTime:end.time, endPrice:end.price, color:'#f59e0b' });
+    saveTrends(currentSymbol,currentTF,trends);
+    drawTrends(); refreshTrendsPanel();
   }
 
-  function deselectLine() {
-    if (!isLineSelected) return;
-    getTrendlinesForSymbol(currentSymbol).forEach(t => t.selected = false);
-    getLevelsForSymbol(currentSymbol).forEach(l => l.selected = false);
-    saveTrendlines();
-    saveLevels();
-    drawTrendlinesOnChart();
-    drawLevelsOnChart();
-    selectedLine = null;
-    isLineSelected = false;
-    hideLineControls();
-    clearLineHandles();
-    log('❌ Line deselected');
+  // --- Cross logic ---
+  function crossed(prevA, prevB, curA, curB){
+    if ([prevA,prevB,curA,curB].some(v=>!Number.isFinite(v))) return false;
+    const d1=prevA-prevB, d2=curA-curB;
+    return (d1>0 && d2<0) || (d1<0 && d2>0);
   }
-
-  function showLineControls(lineInfo) {
-    const panel = document.getElementById('line-controls');
-    panel.style.display = 'block';
-    panel.style.background = 'rgba(0, 0, 0, 0.9)';
-    panel.style.border = '2px solid #22d3ee';
-    panel.style.boxShadow = '0 4px 12px rgba(34, 211, 238, 0.5)';
-    
-    const curr = (lineInfo.data.color || (lineInfo.type==='trendline' ? '#f59e0b' : '#60a5fa'));
-    document.querySelectorAll('.color-option').forEach(o => o.classList.toggle('active', o.dataset.color === curr));
-    
-    // Add selection title
-    let title = panel.querySelector('.selection-title');
-    if (!title) {
-      title = document.createElement('div');
-      title.className = 'selection-title';
-      title.style.cssText = 'color: #22d3ee; font-weight: bold; margin-bottom: 8px; text-align: center; font-size: 14px;';
-      panel.insertBefore(title, panel.firstChild);
-    }
-    title.textContent = `🎯 ${lineInfo.type.toUpperCase()} SELECTED`;
+  function valueOnTrendAt(tr, t){
+    if (tr.endTime===tr.startTime) return tr.startPrice;
+    const m=(tr.endPrice-tr.startPrice)/(tr.endTime-tr.startTime);
+    return tr.startPrice + m*(t-tr.startTime);
   }
-  
-  function hideLineControls() { 
-    const panel = document.getElementById('line-controls');
-    panel.style.display='none';
-    panel.style.border = '1px solid #374151';
-    panel.style.boxShadow = 'none';
-  }
-  
-  function deleteSelectedLine() {
-    if (!selectedLine) return;
-    if (selectedLine.type==='trendline') removeTrendline(selectedLine.data.id);
-    else removeLevel(selectedLine.data.id);
-    deselectLine();
-  }
+  function evaluateCrosses(bars, emaArr){
+    const out={ chips:[] };
+    if (bars.length<2) return out;
+    const b2=bars[bars.length-2], b1=bars[bars.length-1];
 
-  // Draggable handles for trendlines and levels (fixed to prevent explosion)
-  let dragState = { isDragging: false, handleElement: null, isStart: false, lineType: null };
-  
-  function updateLineHandles() {
-    clearLineHandles();
-    if (!selectedLine) return;
-    
-    const p = document.getElementById('chart');
-    
-    if (selectedLine.type === 'trendline') {
-      // Trendline handles - two endpoints
-      const { startTime, startPrice, endTime, endPrice } = selectedLine.data;
-    
-    const createHandle = (x, y, isStart) => { 
-      if (x === null || y === null) return;
-      const handle = document.createElement('div'); 
-      handle.className = 'line-handle';
-      handle.style.cssText = `
-        position: absolute;
-        width: 12px;
-        height: 12px;
-        border: 3px solid #22d3ee;
-        border-radius: 50%;
-        background: ${selectedLine.data.color || '#f59e0b'};
-        transform: translate(-50%, -50%);
-        cursor: grab;
-        z-index: 1000;
-        box-shadow: 0 2px 8px rgba(34, 211, 238, 0.6);
-        pointer-events: auto;
-      `;
-      handle.style.left = x + 'px';
-      handle.style.top = y + 'px';
-      handle.dataset.isStart = isStart;
-      
-      // Simple click to drag - no complex event handling
-      handle.addEventListener('mousedown', (e) => {
-        dragState.isDragging = true;
-        dragState.handleElement = handle;
-        dragState.isStart = isStart;
-        dragState.lineType = 'trendline';
-        handle.style.cursor = 'grabbing';
-        e.preventDefault();
-        e.stopPropagation();
-      });
-      
-      p.appendChild(handle); 
-      lineHandles.push(handle); 
-    };
-    
-    const sx = chart.timeScale().timeToCoordinate(startTime);
-    const sy = candleSeries.priceToCoordinate(startPrice);
-    const ex = chart.timeScale().timeToCoordinate(endTime);
-    const ey = candleSeries.priceToCoordinate(endPrice);
-      
-      createHandle(sx, sy, true);  // Start handle
-      createHandle(ex, ey, false); // End handle
-      
-    } else if (selectedLine.type === 'level') {
-      // Horizontal level handle - single handle in middle for vertical movement only
-      const levelPrice = selectedLine.data.price;
-      
-      try {
-        // Use chart container center for stable positioning
-        const chartRect = p.getBoundingClientRect();
-        const middleX = chartRect.width / 2;
-        const levelY = candleSeries.priceToCoordinate(levelPrice);
-        
-        if (levelY !== null && !isNaN(levelY)) {
-          const handle = document.createElement('div');
-          handle.className = 'level-handle';
-          handle.style.cssText = `
-            position: absolute;
-            width: 16px;
-            height: 8px;
-            border: 2px solid #22d3ee;
-            border-radius: 4px;
-            background: ${selectedLine.data.color || '#60a5fa'};
-            transform: translate(-50%, -50%);
-            cursor: ns-resize;
-            z-index: 1000;
-            box-shadow: 0 2px 8px rgba(34, 211, 238, 0.6);
-            pointer-events: auto;
-          `;
-          handle.style.left = middleX + 'px';
-          handle.style.top = levelY + 'px';
-          
-          handle.addEventListener('mousedown', (e) => {
-            dragState.isDragging = true;
-            dragState.handleElement = handle;
-            dragState.lineType = 'level';
-            handle.style.cursor = 'grabbing';
-            e.preventDefault();
-            e.stopPropagation();
-          });
-          
-          p.appendChild(handle);
-          lineHandles.push(handle);
-        }
-      } catch (error) {
-        console.warn('[EOD] Level handle creation error:', error);
-      }
-    }
-  }
-  
-  // Global drag handlers (only one set of listeners)
-  document.addEventListener('mousemove', (e) => {
-    if (!dragState.isDragging || !dragState.handleElement || !selectedLine) return;
-    
-    try {
-      const p = document.getElementById('chart');
-      if (!p) return;
-      
-      const rect = p.getBoundingClientRect();
-      const newX = e.clientX - rect.left;
-      const newY = e.clientY - rect.top;
-      
-      // Clamp to chart bounds during drag
-      const clampedX = Math.max(0, Math.min(newX, rect.width));
-      const clampedY = Math.max(0, Math.min(newY, rect.height));
-      
-      // Update handle position visually
-      if (dragState.lineType === 'trendline') {
-        // Trendline handles can move freely
-        dragState.handleElement.style.left = clampedX + 'px';
-        dragState.handleElement.style.top = clampedY + 'px';
-      } else if (dragState.lineType === 'level') {
-        // Level handles only move vertically
-        dragState.handleElement.style.top = clampedY + 'px';
-      }
-    } catch (error) {
-      console.warn('[EOD] Drag mousemove error:', error);
-    }
-  });
-  
-  document.addEventListener('mouseup', () => {
-    if (!dragState.isDragging) return;
-    
-    if (dragState.handleElement && selectedLine && dragState.handleElement.parentNode) {
-      const p = document.getElementById('chart');
-      const rect = p.getBoundingClientRect();
-      const handleRect = dragState.handleElement.getBoundingClientRect();
-      let newX = handleRect.left - rect.left + (dragState.lineType === 'level' ? 8 : 6); // Center offset
-      let newY = handleRect.top - rect.top + (dragState.lineType === 'level' ? 4 : 6);
-      
-      // Clamp coordinates to chart bounds
-      newX = Math.max(0, Math.min(newX, rect.width));
-      newY = Math.max(0, Math.min(newY, rect.height));
-      
-      if (dragState.lineType === 'trendline') {
-        // Handle trendline drag
-        const newTime = chart.timeScale().coordinateToTime(newX);
-        const newPrice = candleSeries.coordinateToPrice(newY);
-        
-        if (newTime !== null && newPrice !== null && !isNaN(newTime) && !isNaN(newPrice)) {
-          const trendlines = getTrendlinesForSymbol(currentSymbol);
-          const trendlineIndex = trendlines.findIndex(t => t.id === selectedLine.data.id);
-          if (trendlineIndex >= 0) {
-            if (dragState.isStart) {
-              trendlines[trendlineIndex].startTime = newTime;
-              trendlines[trendlineIndex].startPrice = newPrice;
-              selectedLine.data.startTime = newTime;
-              selectedLine.data.startPrice = newPrice;
-            } else {
-              trendlines[trendlineIndex].endTime = newTime;
-              trendlines[trendlineIndex].endPrice = newPrice;
-              selectedLine.data.endTime = newTime;
-              selectedLine.data.endPrice = newPrice;
-            }
-            saveTrendlines();
-            drawTrendlinesOnChart();
-            updateLineHandles();
-            log('✅ Trendline resized - new position saved');
-          }
-        } else {
-          log('⚠️ Drag position out of bounds - trendline not moved');
-        }
-        
-      } else if (dragState.lineType === 'level') {
-        // Handle horizontal level drag (vertical movement only)
-        const newPrice = candleSeries.coordinateToPrice(newY);
-        
-        if (newPrice !== null && !isNaN(newPrice)) {
-          const levels = getLevelsForSymbol(currentSymbol);
-          const levelIndex = levels.findIndex(l => l.id === selectedLine.data.id);
-          if (levelIndex >= 0) {
-            levels[levelIndex].price = newPrice;
-            selectedLine.data.price = newPrice;
-            saveLevels();
-            drawLevelsOnChart();
-            updateLineHandles();
-            log(`✅ Level moved to ${newPrice.toFixed(2)} - new position saved`);
-          }
-        } else {
-          log('⚠️ Drag position out of bounds - level not moved');
-        }
-      }
-    }
-    
-    // Reset drag state and cursor
-    if (dragState.handleElement && dragState.handleElement.parentNode) {
-      dragState.handleElement.style.cursor = dragState.lineType === 'level' ? 'ns-resize' : 'grab';
-    }
-    dragState = { isDragging: false, handleElement: null, isStart: false, lineType: null };
-  });
-  
-  function clearLineHandles() { 
-    // Reset cursor if actively dragging
-    if (dragState.handleElement) {
-      dragState.handleElement.style.cursor = dragState.lineType === 'level' ? 'ns-resize' : 'grab';
-    }
-    
-    lineHandles.forEach(h=>h.remove()); 
-    lineHandles=[]; 
-    
-    // Completely reset drag state
-    dragState = { isDragging: false, handleElement: null, isStart: false, lineType: null };
-  }
-  
-  // Track chart viewport changes to keep handles synchronized
-  function setupHandleTracking() {
-    chart.timeScale().subscribeVisibleTimeRangeChange(() => {
-      if (selectedLine && selectedLine.type === 'trendline') {
-        updateLineHandles();
-      }
-    });
-  }
-
-  // ---- Event Listeners
-  $('#add-btn').addEventListener('click', addSymbol);
-  $('#new-symbol').addEventListener('keypress', e => e.key === 'Enter' && addSymbol());
-
-  // Watchlist clicks
-  $('#watchlist').addEventListener('click', e => {
-    const item = e.target.closest('.symbol-item');
-    if (item && !e.target.classList.contains('remove-btn')) {
-      loadSymbol(item.dataset.symbol);
-    }
-  });
-
-  // Indicator toggles
-  $('#ema-toggle').addEventListener('click', () => {
-    indicators.ema200 = !indicators.ema200;
-    saveIndicators();
-    updateIndicatorToggles();
-    loadSymbol(currentSymbol); // refresh chart
-  });
-
-  $('#bb-toggle').addEventListener('click', () => {
-    indicators.bb20 = !indicators.bb20;
-    saveIndicators();
-    updateIndicatorToggles();
-    loadSymbol(currentSymbol); // refresh chart
-  });
-
-  // Drawing tool buttons
-  $('#level-tool').addEventListener('click', () => {
-    if (drawingTool === 'level' && drawingMode) {
-      // Turn off drawing mode
-      drawingMode = false;
-      $('#level-tool').classList.remove('active');
-      document.body.classList.remove('drawing-mode');
-      log('Drawing mode off');
-    } else {
-      // Switch to level tool
-      disableTrendlinePreview(); // Clean up any preview
-      drawingMode = true;
-      drawingTool = 'level';
-      trendlineStart = null; // Reset trendline state
-      $('#level-tool').classList.add('active');
-      $('#trendline-tool').classList.remove('active');
-      document.body.classList.add('drawing-mode');
-      log('Click chart to add level');
-    }
-  });
-
-  $('#trendline-tool').addEventListener('click', () => {
-    if (drawingTool === 'trendline' && drawingMode) {
-      // Turn off drawing mode
-      drawingMode = false;
-      trendlineStart = null;
-      disableTrendlinePreview();
-      $('#trendline-tool').classList.remove('active');
-      document.body.classList.remove('drawing-mode');
-      log('Drawing mode off');
-    } else {
-      // Switch to trendline tool
-      disableTrendlinePreview(); // Clean up any existing preview
-      drawingMode = true;
-      drawingTool = 'trendline';
-      trendlineStart = null;
-      $('#trendline-tool').classList.add('active');
-      $('#level-tool').classList.remove('active');
-      document.body.classList.add('drawing-mode');
-      log('Click chart to place first point of trendline');
-    }
-  });
-
-  $('#clear-all').addEventListener('click', () => {
-    if (confirm('Clear all levels and trendlines for ' + currentSymbol + '?')) {
-      clearAllLevels();
-      clearAllTrendlines();
-      log('All levels and trendlines cleared');
-    }
-  });
-
-  // Color picker and delete button event listeners
-  document.getElementById('delete-line').addEventListener('click', deleteSelectedLine);
-  document.querySelectorAll('.color-option').forEach(opt => {
-    opt.addEventListener('click', () => {
-      if (!selectedLine) return;
-      const color = opt.dataset.color;
-      selectedLine.data.color = color;
-      if (selectedLine.type === 'trendline') { 
-        saveTrendlines(); 
-        drawTrendlinesOnChart(); 
-      } else { 
-        saveLevels(); 
-        drawLevelsOnChart(); 
-      }
-      // Keep selection visible after redraw
-      selectLine(selectedLine);
-      log(`Changed line color to ${color}`);
-    });
-  });
-
-  // Timeframe buttons (1D active, 1W/1M planned for Phase 3)
-  $$('.timeframe-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (btn.dataset.tf === '1D') {
-        $$('.timeframe-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        log('Daily timeframe selected');
+    // EMA200
+    if (emaOn && emaArr?.length>=2){
+      const e2=emaArr[emaArr.length-2].value, e1=emaArr[emaArr.length-1].value;
+      if (crossed(b2.close, e2, b1.close, e1)) {
+        out.chips.push( (b1.close>e1) ? chip('EMA200 ↑','good') : chip('EMA200 ↓','bad') );
       } else {
-        log(`${btn.dataset.tf} aggregation planned for Phase 3`);
+        out.chips.push( (b1.close>=e1) ? chip('Above EMA200','good') : chip('Below EMA200','bad') );
+      }
+    }
+
+    // Levels
+    const nearBps = 30; // 0.30%
+    levels.forEach(lv=>{
+      if (crossed(b2.close, lv.price, b1.close, lv.price)){
+        out.chips.push( (b1.close>lv.price) ? chip(`Level ${lv.price.toFixed(2)} ↑`,'good') : chip(`Level ${lv.price.toFixed(2)} ↓`,'bad') );
+      } else {
+        const dist = Math.abs(b1.close - lv.price)/lv.price*10000; // bps
+        if (dist <= nearBps) out.chips.push(chip(`Near ${lv.price.toFixed(2)} (${dist.toFixed(0)}bps)`,'warn'));
       }
     });
+
+    // Trendlines
+    trends.forEach(tr=>{
+      const y2=valueOnTrendAt(tr, b2.time), y1=valueOnTrendAt(tr, b1.time);
+      if (Number.isFinite(y2)&&Number.isFinite(y1) && crossed(b2.close,y2,b1.close,y1)){
+        out.chips.push( (b1.close>y1) ? chip('Trend ↑','good') : chip('Trend ↓','bad') );
+      }
+    });
+
+    return out;
+  }
+  function renderChips(out){
+    const box=$('#chips'); box.innerHTML=''; out.chips.forEach(c=>box.appendChild(c));
+  }
+
+  // --- Fetch data ---
+  async function fetchBars(symbol, days=4000){
+    const r = await fetch(`${API}/eod?symbol=${encodeURIComponent(symbol)}&days=${days}`);
+    if (!r.ok){ const t=await r.text(); log(`HTTP ${r.status}\n${t}`); return []; }
+    const j = await r.json();
+    return j.data || [];
+  }
+
+  // --- TF management ---
+  function applyTF(tf, firstLoad=false){
+    currentTF = tf;
+    let bars = dailyBars;
+    if (tf==='1W') bars = resampleWeekly(dailyBars);
+    else if (tf==='1M') bars = resampleMonthly(dailyBars);
+    else if (tf==='4H') { console.warn('4H requires intraday. Showing daily until intraday endpoint is added.'); bars = dailyBars; }
+
+    tfBars = bars;
+    candle.setData(bars);
+
+    // indicators
+    let emaArr = [];
+    if (emaOn){
+      emaArr = emaFromBars(bars,200);
+      emaSeries.setData(emaArr);
+    } else {
+      emaSeries.setData([]);
+    }
+
+    // redraw drawings for this sym+tf
+    levels = loadLevels(currentSymbol,currentTF);
+    trends = loadTrends(currentSymbol,currentTF);
+    drawLevels(); refreshLevelsPanel();
+    drawTrends(); refreshTrendsPanel();
+
+    chart.timeScale().fitContent();
+
+    // chips
+    renderChips(evaluateCrosses(bars, emaArr));
+    if (!firstLoad) $('#topStatus').textContent = `${currentSymbol} · ${currentTF}`;
+  }
+
+  async function loadSymbol(sym){
+    currentSymbol = sym.toUpperCase();
+    $('#topStatus').textContent = `Loading ${currentSymbol}…`;
+    const bars = await fetchBars(currentSymbol, 4000);
+    if (!bars.length){ log('No data'); return; }
+    dailyBars = bars;
+    applyTF(currentTF, true);
+    $('#topStatus').textContent = `${currentSymbol} · ${currentTF} · ${bars.length} bars`;
+  }
+
+  // --- Tools wiring ---
+  $('#btnLoad').onclick = ()=> loadSymbol($('#ticker').value.trim()||'AAPL');
+  $$('.tf').forEach(b=>b.addEventListener('click', ()=>{
+    $$('.tf').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    applyTF(b.dataset.tf);
+  }));
+  $('#toggleEMA').onclick = ()=>{ emaOn=!emaOn; $('#toggleEMA').classList.toggle('active', emaOn); applyTF(currentTF); };
+
+  // Levels: click to add at mouse
+  $('#toolLevel').onclick = ()=>{
+    const active = !$('#toolLevel').classList.contains('active');
+    drawingMode = active; drawingTool = active?'level':null; trendStart=null;
+    $('#toolLevel').classList.toggle('active', active);
+    $('#toolTrend').classList.remove('active');
+    $('#topStatus').textContent = active? 'Click chart to place a level' : 'Ready';
+  };
+
+  // Trendlines: two clicks
+  $('#toolTrend').onclick = ()=>{
+    const active = !$('#toolTrend').classList.contains('active');
+    drawingMode = active; drawingTool = active?'trendline':null; trendStart=null;
+    $('#toolTrend').classList.toggle('active', active);
+    $('#toolLevel').classList.remove('active');
+    $('#topStatus').textContent = active? 'Click first point' : 'Ready';
+  };
+
+  chart.subscribeClick((p)=>{
+    if (!drawingMode || !p?.point) return;
+    const price = candle.coordinateToPrice(p.point.y);
+    const time  = chart.timeScale().coordinateToTime(p.point.x);
+    if (!Number.isFinite(price) || time==null) return;
+
+    if (drawingTool==='level'){
+      addLevel(price);
+      drawingMode=false; $('#toolLevel').classList.remove('active'); $('#topStatus').textContent='Level added';
+    } else if (drawingTool==='trendline'){
+      if (!trendStart){ trendStart={time,price}; $('#topStatus').textContent='First set. Click second point.'; }
+      else { addTrend(trendStart,{time,price}); trendStart=null; drawingMode=false; $('#toolTrend').classList.remove('active'); $('#topStatus').textContent='Trendline added'; }
+    }
   });
 
-  // ---- Initialize
-  updateWatchlistDisplay();
-  updateIndicatorToggles();
-  updateLevelsDisplay();
-  updateTrendlinesDisplay();
-  setupChartInteraction();
-  setupHandleTracking();
-  loadSymbol(currentSymbol);
+  // --- Board (10 minis + enlarge) ---
+  async function buildBoard(symbols=DEFAULT_WATCHLIST){
+    const grid = $('#board-grid'); grid.innerHTML='';
+    for (const sym of symbols.slice(0,10)){
+      const cell = document.createElement('div'); cell.className='mini';
+      const title = document.createElement('div'); title.className='title'; title.textContent=sym;
+      const canvas = document.createElement('div'); canvas.style.position='absolute'; canvas.style.left=0; canvas.style.right=0; canvas.style.bottom=0; canvas.style.top='20px';
+      const enlarge = document.createElement('button'); enlarge.className='enlarge'; enlarge.textContent='⤢';
+      cell.append(title, canvas, enlarge); grid.appendChild(cell);
 
-  // health check with status indicator
-  fetch(`${API}/healthz`)
-    .then(r => {
-      if (r.ok) {
-        log('Backend OK');
-        $('#status-dot').className = 'status-dot status-connected';
-      } else {
-        log('Backend NOT OK');
-        $('#status-dot').className = 'status-dot status-error';
-      }
-    })
-    .catch(e => {
-      log('Backend connection failed');
-      $('#status-dot').className = 'status-dot status-error';
+      const mini = LightweightCharts.createChart(canvas,{
+        layout:{ background:{ color:'#0f1b2b' }, textColor:'#cbd5e1' },
+        rightPriceScale:{ borderVisible:false }, timeScale:{ borderVisible:false },
+        grid:{ vertLines:{ color:'#0f1b2b' }, horzLines:{ color:'#0f1b2b' } }
+      });
+      const s = mini.addCandlestickSeries({ upColor:'#4ade80', downColor:'#ef4444', borderVisible:false, wickUpColor:'#4ade80', wickDownColor:'#ef4444' });
+      fetchBars(sym, 800).then(b=>{ s.setData(b.slice(-260)); mini.timeScale().fitContent(); });
+
+      canvas.onclick = ()=>loadSymbol(sym);
+      enlarge.onclick = ()=>openModal(sym);
+    }
+  }
+
+  function openModal(sym){
+    const modal=$('#modal'); const host=$('#modalCanvas');
+    host.innerHTML=''; modal.style.display='flex';
+    const big = LightweightCharts.createChart(host,{
+      layout:{ background:{ color:'#0f1b2b' }, textColor:'#cbd5e1' },
+      rightPriceScale:{ borderVisible:false }, timeScale:{ borderVisible:false }
     });
+    const s = big.addCandlestickSeries();
+    fetchBars(sym, 2000).then(b=>{ s.setData(b); big.timeScale().fitContent(); });
+    $('#modal .close').onclick = ()=>{ modal.style.display='none'; big.remove(); };
+  }
 
-  // removeSymbol no longer needs to be global (using event delegation)
+  // --- Boot ---
+  fetch(`${API}/healthz`).then(r=>r.ok?log('Backend OK'):log('Backend NOT OK')).catch(e=>log('Backend error: '+e.message));
+  buildBoard();
+  loadSymbol('AAPL');
 })();
 </script>
 </body>
