@@ -6,7 +6,7 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 const TIINGO_TOKEN = process.env.TIINGO_TOKEN || process.env.TIINGO_KEY; // accept either name
 const INTRADAY_PROVIDER = process.env.INTRADAY_PROVIDER || '';            // e.g. 'tiingo' later
 
@@ -161,8 +161,8 @@ app.get('/intraday', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ EOD server running at http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ EOD server running at http://0.0.0.0:${PORT}`);
   if (!INTRADAY_PROVIDER) {
     console.log('ℹ️  /intraday is disabled (set INTRADAY_PROVIDER to enable).');
   }

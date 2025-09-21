@@ -133,23 +133,80 @@
   let priceLines = [];    // live chart price lines
   let trendSeries = [];   // live chart line series
 
-  // --- Chart bootstrap (main) ---
-  const chart = LightweightCharts.createChart($('#chart'), {
-    layout:{ background:{ color:'#0f1b2b' }, textColor:'#cbd5e1' },
-    rightPriceScale:{ borderVisible:false },
-    timeScale:{ borderColor:'#22314a' },
-    grid:{ vertLines:{ color:'#132032' }, horzLines:{ color:'#132032' } },
-    autoSize:true
-  });
-  const candle = chart.addCandlestickSeries({
-    upColor: getComputedStyle(document.documentElement).getPropertyValue('--good').trim() || '#4ade80',
-    downColor: getComputedStyle(document.documentElement).getPropertyValue('--bad').trim() || '#ef4444',
-    wickUpColor:'#4ade80', wickDownColor:'#ef4444', borderVisible:false
-  });
-  const emaSeries = chart.addLineSeries({ color:'#60a5fa', lineWidth:2 });
-  let bbUpperSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
-  let bbMiddleSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
-  let bbLowerSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
+  // --- Chart variables (will be initialized when DOM is ready) ---
+  let chart, candle, emaSeries, bbUpperSeries, bbMiddleSeries, bbLowerSeries;
+
+  // --- Chart initialization ---
+  function initChart() {
+    const chartContainer = $('#chart');
+    if (!chartContainer) {
+      console.error('[EOD] Chart container not found!');
+      return false;
+    }
+    
+    console.log('[EOD] Creating chart...');
+    try {
+      chart = LightweightCharts.createChart(chartContainer, {
+      layout:{ background:{ color:'#0f1b2b' }, textColor:'#cbd5e1' },
+      rightPriceScale:{ borderVisible:false },
+      timeScale:{ borderColor:'#22314a' },
+      grid:{ vertLines:{ color:'#132032' }, horzLines:{ color:'#132032' } },
+        autoSize:true
+      });
+      
+      console.log('[EOD] Chart created successfully');
+      
+      candle = chart.addCandlestickSeries({
+        upColor: getComputedStyle(document.documentElement).getPropertyValue('--good').trim() || '#4ade80',
+        downColor: getComputedStyle(document.documentElement).getPropertyValue('--bad').trim() || '#ef4444',
+        wickUpColor:'#4ade80', wickDownColor:'#ef4444', borderVisible:false
+      });
+      
+      emaSeries = chart.addLineSeries({ color:'#60a5fa', lineWidth:2 });
+      bbUpperSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
+      bbMiddleSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
+      bbLowerSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
+      
+      console.log('[EOD] Chart series added successfully');
+      
+      // Set up chart click handler for drawing tools
+      if (chart && chart.subscribeClick) {
+        chart.subscribeClick((param) => {
+        if (!drawingMode || !drawingTool) return;
+        const price = candle.coordinateToPrice(param.point.y);
+        const time = chart.timeScale().coordinateToTime(param.point.x);
+        if (!price || !time) return;
+        
+        if (drawingTool === 'level') {
+          addLevel(price);
+          drawingMode = false;
+          drawingTool = null;
+          $('#toolLevel').classList.remove('active');
+          log('✅ Level added at ' + price.toFixed(2));
+        } else if (drawingTool === 'trendline') {
+          if (!trendStart) {
+            trendStart = { time, price };
+            log('📍 Trendline start set. Click second point.');
+          } else {
+            addTrend(trendStart, { time, price });
+            trendStart = null;
+            drawingMode = false;
+            drawingTool = null;
+            $('#toolTrend').classList.remove('active');
+            log('✅ Trendline added');
+          }
+        }
+      });
+      }
+      
+      console.log('[EOD] Chart initialization complete');
+      return true;
+      
+    } catch (error) {
+      console.error('[EOD] Chart initialization failed:', error);
+      return false;
+    }
+  }
 
   // --- Indicators ---
   function emaFromBars(bars, period=200){
@@ -452,10 +509,102 @@
     $('#modal .close').onclick = ()=>{ modal.style.display='none'; big.remove(); };
   }
 
+  // --- Event handlers ---
+  function setupEventHandlers() {
+    $('#btnLoad').onclick = () => {
+      const sym = $('#ticker').value.trim().toUpperCase();
+      if (sym) loadSymbol(sym);
+    };
+    
+    $('#ticker').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        const sym = $('#ticker').value.trim().toUpperCase();
+        if (sym) loadSymbol(sym);
+      }
+    });
+    
+    // Timeframe buttons
+    $$('.tf').forEach(btn => {
+      btn.onclick = () => {
+        $$('.tf').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentTF = btn.dataset.tf;
+        loadSymbol(currentSymbol);
+      };
+    });
+    
+    // Drawing tools
+    $('#toolLevel').onclick = () => {
+      const btn = $('#toolLevel');
+      if (drawingMode && drawingTool === 'level') {
+        drawingMode = false;
+        drawingTool = null;
+        btn.classList.remove('active');
+        log('❌ Level tool deactivated');
+      } else {
+        drawingMode = true;
+        drawingTool = 'level';
+        trendStart = null;
+        btn.classList.add('active');
+        $('#toolTrend').classList.remove('active');
+        log('🎯 Click on chart to add horizontal level');
+      }
+    };
+    
+    $('#toolTrend').onclick = () => {
+      const btn = $('#toolTrend');
+      if (drawingMode && drawingTool === 'trendline') {
+        drawingMode = false;
+        drawingTool = null;
+        trendStart = null;
+        btn.classList.remove('active');
+        log('❌ Trendline tool deactivated');
+      } else {
+        drawingMode = true;
+        drawingTool = 'trendline';
+        trendStart = null;
+        btn.classList.add('active');
+        $('#toolLevel').classList.remove('active');
+        log('📈 Click two points to draw trendline');
+      }
+    };
+    
+    // EMA toggle
+    $('#toggleEMA').onclick = () => {
+      emaOn = !emaOn;
+      $('#toggleEMA').classList.toggle('active', emaOn);
+      if (emaOn) {
+        const ema = emaFromBars(tfBars);
+        emaSeries.setData(ema);
+        log('✅ EMA200 enabled');
+      } else {
+        emaSeries.setData([]);
+        log('❌ EMA200 disabled');
+      }
+    };
+  }
+
   // --- Boot ---
-  fetch(`${API}/healthz`).then(r=>r.ok?log('Backend OK'):log('Backend NOT OK')).catch(e=>log('Backend error: '+e.message));
-  buildBoard();
-  loadSymbol('AAPL');
+  function initialize() {
+    fetch(`${API}/healthz`).then(r=>r.ok?log('Backend OK'):log('Backend NOT OK')).catch(e=>log('Backend error: '+e.message));
+    
+    if (!initChart()) {
+      log('❌ Chart initialization failed');
+      return;
+    }
+    
+    setupEventHandlers();
+    buildBoard();
+    loadSymbol('AAPL');
+    log('🚀 EOD Watch initialized');
+  }
+  
+  // Wait for DOM to be ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initialize);
+  } else {
+    initialize();
+  }
 })();
 </script>
 </body>
