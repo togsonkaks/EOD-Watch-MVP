@@ -222,9 +222,11 @@
   
   let watchlist = JSON.parse(localStorage.getItem('eod-watchlist') || '["AAPL", "META", "TSLA", "GOOGL", "MSFT"]');
   let currentSymbol = localStorage.getItem('eod-current-symbol') || 'AAPL';
+  let currentTimeframe = localStorage.getItem('eod-current-timeframe') || '1D';
   let indicators = JSON.parse(localStorage.getItem('eod-indicators') || '{"ema200": true, "bb20": false}');
-  let levels = {}; // Start fresh
-  let trendlines = {}; // Start fresh
+  let dailyBars = []; // Store raw daily data for resampling
+  let levels = {}; // Start fresh - now organized by symbol+timeframe
+  let trendlines = {}; // Start fresh - now organized by symbol+timeframe
   let drawingMode = false;
   let drawingTool = 'level'; // 'level' or 'trendline'
   let trendlineStart = null; // for 2-point trendline drawing
@@ -293,6 +295,99 @@
     return { upper, middle, lower };
   }
 
+  // Weekly resampling (aggregates daily bars to weekly candles)
+  function resampleWeekly(daily) {
+    if (!daily || !daily.length) return [];
+    
+    const weekly = [];
+    let currentWeek = null;
+    let weekData = null;
+    
+    // Helper function to get ISO week number
+    function getISOWeek(timestamp) {
+      const date = new Date(timestamp * 1000);
+      date.setUTCHours(0, 0, 0, 0);
+      const dayOfWeek = (date.getUTCDay() + 6) % 7; // Monday = 0
+      date.setUTCDate(date.getUTCDate() - dayOfWeek + 3); // Thursday of current week
+      const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
+      const weekNumber = 1 + Math.round(((date - firstThursday) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+      return date.getUTCFullYear() + "-" + weekNumber;
+    }
+    
+    for (const bar of daily) {
+      if (!bar || typeof bar.time !== 'number') continue;
+      
+      const week = getISOWeek(bar.time);
+      
+      if (week !== currentWeek) {
+        // Start new week
+        if (weekData) weekly.push(weekData);
+        weekData = {
+          time: bar.time,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close
+        };
+        currentWeek = week;
+      } else {
+        // Update current week data
+        weekData.high = Math.max(weekData.high, bar.high);
+        weekData.low = Math.min(weekData.low, bar.low);
+        weekData.close = bar.close; // Last close of the week
+      }
+    }
+    
+    // Add final week
+    if (weekData) weekly.push(weekData);
+    
+    return weekly;
+  }
+
+  // Monthly resampling (aggregates daily bars to monthly candles)
+  function resampleMonthly(daily) {
+    if (!daily || !daily.length) return [];
+    
+    const monthly = [];
+    let currentMonth = null;
+    let monthData = null;
+    
+    // Helper function to get year-month key
+    function getYearMonth(timestamp) {
+      const date = new Date(timestamp * 1000);
+      return date.getUTCFullYear() + "-" + String(date.getUTCMonth() + 1).padStart(2, '0');
+    }
+    
+    for (const bar of daily) {
+      if (!bar || typeof bar.time !== 'number') continue;
+      
+      const month = getYearMonth(bar.time);
+      
+      if (month !== currentMonth) {
+        // Start new month
+        if (monthData) monthly.push(monthData);
+        monthData = {
+          time: bar.time,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close
+        };
+        currentMonth = month;
+      } else {
+        // Update current month data
+        monthData.high = Math.max(monthData.high, bar.high);
+        monthData.low = Math.min(monthData.low, bar.low);
+        monthData.close = bar.close; // Last close of the month
+      }
+    }
+    
+    // Add final month
+    if (monthData) monthly.push(monthData);
+    
+    return monthly;
+  }
+
   async function fetchBars(symbol, days = 600) {
     const url = `${API}/eod?symbol=${encodeURIComponent(symbol)}&days=${days}`;
     const r = await fetch(url);
@@ -304,22 +399,56 @@
     }));
   }
 
-  async function loadSymbol(sym) {
+  // Helper functions for per-timeframe storage
+  function getStorageKey(symbol, timeframe, dataType) {
+    return `eod-${dataType}-${symbol}-${timeframe}`;
+  }
+
+  function getLevelsForSymbol(symbol, timeframe = currentTimeframe) {
+    const key = getStorageKey(symbol, timeframe, 'levels');
+    try {
+      return JSON.parse(localStorage.getItem(key) || '[]');
+    } catch {
+      return [];
+    }
+  }
+
+  function getTrendlinesForSymbol(symbol, timeframe = currentTimeframe) {
+    const key = getStorageKey(symbol, timeframe, 'trendlines');
+    try {
+      return JSON.parse(localStorage.getItem(key) || '[]');
+    } catch {
+      return [];
+    }
+  }
+
+  function saveLevelsForSymbol(symbol, timeframe, levelsArray) {
+    const key = getStorageKey(symbol, timeframe, 'levels');
+    localStorage.setItem(key, JSON.stringify(levelsArray));
+  }
+
+  function saveTrendlinesForSymbol(symbol, timeframe, trendlinesArray) {
+    const key = getStorageKey(symbol, timeframe, 'trendlines');
+    localStorage.setItem(key, JSON.stringify(trendlinesArray));
+  }
+
+  async function loadSymbol(sym, timeframe = currentTimeframe) {
     try {
       // Show loading state
       $('#loading-overlay').classList.add('show');
       $('#status-dot').className = 'status-dot status-loading';
-      log(`Loading ${sym}…`);
+      log(`Loading ${sym} (${timeframe})…`);
       
+      // Always fetch daily data first
       const bars = await fetchBars(sym, 600);
       if (!bars.length) { 
         log('No data returned.'); 
         $('#status-dot').className = 'status-dot status-error';
         return; 
       }
-      
-      // Update chart with validated data
-      const validBars = bars.filter(bar => 
+
+      // Store daily bars for resampling
+      dailyBars = bars.filter(bar => 
         bar && 
         bar.time != null && 
         Number.isFinite(bar.open) && Number.isFinite(bar.high) && 
@@ -327,12 +456,28 @@
         !isNaN(bar.open) && !isNaN(bar.high) && 
         !isNaN(bar.low) && !isNaN(bar.close)
       );
-      console.log(`[EOD] Filtered ${bars.length - validBars.length} invalid bars`);
-      candleSeries.setData(validBars);
+      
+      // Get bars for current timeframe
+      let chartBars;
+      switch (timeframe) {
+        case '1W':
+          chartBars = resampleWeekly(dailyBars);
+          break;
+        case '1M':
+          chartBars = resampleMonthly(dailyBars);
+          break;
+        case '1D':
+        default:
+          chartBars = dailyBars;
+          break;
+      }
+      
+      console.log(`[EOD] Filtered ${bars.length - dailyBars.length} invalid bars`);
+      candleSeries.setData(chartBars);
       
       // Update indicators based on toggles with validation
       if (indicators.ema200) {
-        const ema200 = ema(bars, 200);
+        const ema200 = ema(chartBars, 200);
         // Validate EMA data before setting
         const validEMA = ema200.filter(point => 
           point && point.time != null && Number.isFinite(point.value) && !isNaN(point.value)
@@ -343,7 +488,7 @@
       }
       
       if (indicators.bb20) {
-        const bb = bollingerBands(bars, 20, 2);
+        const bb = bollingerBands(chartBars, 20, 2);
         // Validate Bollinger Bands data before setting
         const validUpper = bb.upper.filter(point => 
           point && point.time != null && Number.isFinite(point.value) && !isNaN(point.value)
@@ -365,8 +510,10 @@
       
       chart.timeScale().fitContent();
       currentSymbol = sym;
-      $('#current-symbol').textContent = sym;
+      currentTimeframe = timeframe;
       localStorage.setItem('eod-current-symbol', sym);
+      localStorage.setItem('eod-current-timeframe', timeframe);
+      updateTimeframeDisplay();
       updateWatchlistDisplay();
       updateLevelsDisplay();
       drawLevelsOnChart();
@@ -445,24 +592,32 @@
     $('#bb-toggle').className = indicators.bb20 ? 'toggle-switch active' : 'toggle-switch';
   }
 
+  function updateTimeframeDisplay() {
+    // Update timeframe button states
+    $$('.tf.btn-toggle').forEach(btn => {
+      btn.classList.remove('active');
+      if (btn.dataset.tf === currentTimeframe) {
+        btn.classList.add('active');
+      }
+    });
+  }
+
   function saveIndicators() {
     localStorage.setItem('eod-indicators', JSON.stringify(indicators));
   }
 
   function saveLevels() {
-    localStorage.setItem('eod-levels', JSON.stringify(levels));
+    const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+    saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
   }
 
   function saveTrendlines() {
-    localStorage.setItem('eod-trendlines', JSON.stringify(trendlines));
-  }
-
-  function getTrendlinesForSymbol(symbol) {
-    return trendlines[symbol] || [];
+    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
   }
 
   function addTrendline(startTime, startPrice, endTime, endPrice) {
-    if (!trendlines[currentSymbol]) trendlines[currentSymbol] = [];
+    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
     const trendlineId = Date.now().toString();
     const trendline = {
       id: trendlineId,
@@ -474,37 +629,29 @@
       color: '#f59e0b', // default color
       selected: false
     };
-    trendlines[currentSymbol].push(trendline);
-    saveTrendlines();
+    symbolTrendlines.push(trendline);
+    saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
     updateTrendlinesDisplay();
     drawTrendlinesOnChart();
     return trendline;
   }
 
   function removeTrendline(trendlineId) {
-    if (trendlines[currentSymbol]) {
-      trendlines[currentSymbol] = trendlines[currentSymbol].filter(t => t.id !== trendlineId);
-      saveTrendlines();
-      updateTrendlinesDisplay();
-      drawTrendlinesOnChart();
-    }
+    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    const filtered = symbolTrendlines.filter(t => t.id !== trendlineId);
+    saveTrendlinesForSymbol(currentSymbol, currentTimeframe, filtered);
+    updateTrendlinesDisplay();
+    drawTrendlinesOnChart();
   }
 
   function clearAllTrendlines() {
-    if (trendlines[currentSymbol]) {
-      trendlines[currentSymbol] = [];
-      saveTrendlines();
-      updateTrendlinesDisplay();
-      drawTrendlinesOnChart();
-    }
-  }
-
-  function getLevelsForSymbol(symbol) {
-    return levels[symbol] || [];
+    saveTrendlinesForSymbol(currentSymbol, currentTimeframe, []);
+    updateTrendlinesDisplay();
+    drawTrendlinesOnChart();
   }
 
   function addLevel(price) {
-    if (!levels[currentSymbol]) levels[currentSymbol] = [];
+    const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
     const levelId = Date.now().toString();
     const level = {
       id: levelId,
@@ -513,62 +660,70 @@
       color: '#60a5fa', // default color
       selected: false
     };
-    levels[currentSymbol].push(level);
-    saveLevels();
+    symbolLevels.push(level);
+    saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
     updateLevelsDisplay();
     drawLevelsOnChart();
     return level;
   }
 
   function removeLevel(levelId) {
-    if (levels[currentSymbol]) {
-      levels[currentSymbol] = levels[currentSymbol].filter(l => l.id !== levelId);
-      saveLevels();
-      updateLevelsDisplay();
-      drawLevelsOnChart();
-    }
+    const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+    const filtered = symbolLevels.filter(l => l.id !== levelId);
+    saveLevelsForSymbol(currentSymbol, currentTimeframe, filtered);
+    updateLevelsDisplay();
+    drawLevelsOnChart();
   }
 
   function clearAllLevels() {
-    if (levels[currentSymbol]) {
-      levels[currentSymbol] = [];
-      saveLevels();
-      updateLevelsDisplay();
-      drawLevelsOnChart();
-    }
+    saveLevelsForSymbol(currentSymbol, currentTimeframe, []);
+    updateLevelsDisplay();
+    drawLevelsOnChart();
   }
 
   function updateLevelsDisplay() {
-    const container = $('#levels-list');
+    const container = $('#levels');
+    if (!container) return;
     container.innerHTML = '';
     
-    const symbolLevels = getLevelsForSymbol(currentSymbol);
+    const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
     symbolLevels.forEach(level => {
-      const item = document.createElement('div');
-      item.className = 'level-item';
-      
-      const priceSpan = document.createElement('span');
-      priceSpan.className = 'level-price';
-      priceSpan.textContent = level.price.toFixed(2);
-      
-      const controls = document.createElement('div');
-      controls.className = 'level-controls';
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `<span>${level.price.toFixed(2)}</span>`;
       
       const deleteBtn = document.createElement('button');
-      deleteBtn.textContent = '×';
-      deleteBtn.title = 'Delete level';
+      deleteBtn.className = 'kill';
+      deleteBtn.textContent = '✕';
       deleteBtn.addEventListener('click', () => removeLevel(level.id));
       
-      controls.appendChild(deleteBtn);
-      item.appendChild(priceSpan);
-      item.appendChild(controls);
-      container.appendChild(item);
+      row.appendChild(deleteBtn);
+      container.appendChild(row);
     });
   }
 
   function updateTrendlinesDisplay() {
-    // For now, we'll display trendlines in the levels list
-    // A future enhancement could be a separate trendlines panel
+    const container = $('#trends');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    symbolTrendlines.forEach(trendline => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      
+      const startDate = new Date(trendline.startTime * 1000).toISOString().slice(0, 10);
+      const endDate = new Date(trendline.endTime * 1000).toISOString().slice(0, 10);
+      row.innerHTML = `<span>${startDate} → ${endDate}</span>`;
+      
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'kill';
+      deleteBtn.textContent = '✕';
+      deleteBtn.addEventListener('click', () => removeTrendline(trendline.id));
+      
+      row.appendChild(deleteBtn);
+      container.appendChild(row);
+    });
   }
 
   function drawTrendlinesOnChart() {
@@ -576,8 +731,8 @@
     currentTrendlines.forEach(line => chart.removeSeries(line));
     currentTrendlines = [];
     
-    // Draw current symbol's trendlines
-    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol);
+    // Draw current symbol's trendlines for current timeframe
+    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
     
     // Sanitize and validate trendlines before drawing
     const validTrendlines = symbolTrendlines.filter(t => 
@@ -621,11 +776,10 @@
         } else {
           console.warn('[EOD] Skipped invalid trendline data:', lineData);
           chart.removeSeries(trendlineSeries);
-          // Remove this invalid trendline from storage
-          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol);
+          // Remove this invalid trendline from storage (using per-timeframe storage)
+          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
           const updatedTrendlines = symbolTrendlines.filter(t => t.id !== trendline.id);
-          trendlines[currentSymbol] = updatedTrendlines;
-          saveTrendlines();
+          saveTrendlinesForSymbol(currentSymbol, currentTimeframe, updatedTrendlines);
         }
       } catch (error) {
         console.error('[EOD] Error drawing trendline:', error, trendline);
@@ -634,9 +788,7 @@
     
     // Clean up invalid trendlines from storage if we filtered any out
     if (validTrendlines.length !== symbolTrendlines.length) {
-      if (!trendlines[currentSymbol]) trendlines[currentSymbol] = [];
-      trendlines[currentSymbol] = validTrendlines;
-      saveTrendlines();
+      saveTrendlinesForSymbol(currentSymbol, currentTimeframe, validTrendlines);
       log(`Cleaned up ${symbolTrendlines.length - validTrendlines.length} invalid trendlines`);
     }
   }
@@ -1275,15 +1427,20 @@
     });
   });
 
-  // Timeframe buttons (1D active, 1W/1M planned for Phase 3)
-  $$('.timeframe-btn').forEach(btn => {
+  // Enhanced timeframe buttons with full multi-timeframe support
+  $$('.tf.btn-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
-      if (btn.dataset.tf === '1D') {
-        $$('.timeframe-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        log('Daily timeframe selected');
-      } else {
-        log(`${btn.dataset.tf} aggregation planned for Phase 3`);
+      const tf = btn.dataset.tf;
+      if (tf === '4H') {
+        log('4H timeframe requires intraday data (not available)');
+        return;
+      }
+      
+      if (tf !== currentTimeframe) {
+        currentTimeframe = tf;
+        updateTimeframeDisplay();
+        loadSymbol(currentSymbol, currentTimeframe);
+        log(`${tf} timeframe selected`);
       }
     });
   });
