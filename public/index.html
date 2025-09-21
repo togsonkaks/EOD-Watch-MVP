@@ -814,7 +814,9 @@
     deselectLine();
   }
 
-  // Draggable handles for trendlines
+  // Draggable handles for trendlines (fixed to prevent explosion)
+  let dragState = { isDragging: false, handleElement: null, isStart: false };
+  
   function updateLineHandles() {
     clearLineHandles();
     if (!selectedLine || selectedLine.type!=='trendline') return;
@@ -840,59 +842,16 @@
       `;
       handle.style.left = x + 'px';
       handle.style.top = y + 'px';
+      handle.dataset.isStart = isStart;
       
-      // Add drag functionality
-      let isDragging = false;
+      // Simple click to drag - no complex event handling
       handle.addEventListener('mousedown', (e) => {
-        isDragging = true;
+        dragState.isDragging = true;
+        dragState.handleElement = handle;
+        dragState.isStart = isStart;
         handle.style.cursor = 'grabbing';
         e.preventDefault();
         e.stopPropagation();
-      });
-      
-      document.addEventListener('mousemove', (e) => {
-        if (!isDragging) return;
-        const rect = p.getBoundingClientRect();
-        const newX = e.clientX - rect.left;
-        const newY = e.clientY - rect.top;
-        
-        handle.style.left = newX + 'px';
-        handle.style.top = newY + 'px';
-        
-        // Update trendline data
-        const newTime = chart.timeScale().coordinateToTime(newX);
-        const newPrice = candleSeries.coordinateToPrice(newY);
-        
-        if (newTime && newPrice && !isNaN(newTime) && !isNaN(newPrice)) {
-          // Update the trendline data in storage
-          const trendlines = getTrendlinesForSymbol(currentSymbol);
-          const trendlineIndex = trendlines.findIndex(t => t.id === selectedLine.data.id);
-          if (trendlineIndex >= 0) {
-            if (isStart) {
-              trendlines[trendlineIndex].startTime = newTime;
-              trendlines[trendlineIndex].startPrice = newPrice;
-              selectedLine.data.startTime = newTime;
-              selectedLine.data.startPrice = newPrice;
-            } else {
-              trendlines[trendlineIndex].endTime = newTime;
-              trendlines[trendlineIndex].endPrice = newPrice;
-              selectedLine.data.endTime = newTime;
-              selectedLine.data.endPrice = newPrice;
-            }
-            saveTrendlines();
-            drawTrendlinesOnChart();
-            // Redraw handles at new position
-            setTimeout(() => updateLineHandles(), 10);
-          }
-        }
-      });
-      
-      document.addEventListener('mouseup', () => {
-        if (isDragging) {
-          isDragging = false;
-          handle.style.cursor = 'grab';
-          log('✅ Trendline resized - new position saved');
-        }
       });
       
       p.appendChild(handle); 
@@ -908,9 +867,81 @@
     createHandle(ex, ey, false); // End handle
   }
   
+  // Global drag handlers (only one set of listeners)
+  document.addEventListener('mousemove', (e) => {
+    if (!dragState.isDragging || !dragState.handleElement) return;
+    
+    const p = document.getElementById('chart');
+    const rect = p.getBoundingClientRect();
+    const newX = e.clientX - rect.left;
+    const newY = e.clientY - rect.top;
+    
+    // Update handle position visually
+    dragState.handleElement.style.left = newX + 'px';
+    dragState.handleElement.style.top = newY + 'px';
+  });
+  
+  document.addEventListener('mouseup', () => {
+    if (!dragState.isDragging) return;
+    
+    if (dragState.handleElement && selectedLine && dragState.handleElement.parentNode) {
+      const p = document.getElementById('chart');
+      const rect = p.getBoundingClientRect();
+      const handleRect = dragState.handleElement.getBoundingClientRect();
+      let newX = handleRect.left - rect.left + 6; // +6 for handle center
+      let newY = handleRect.top - rect.top + 6;
+      
+      // Clamp coordinates to chart bounds
+      newX = Math.max(0, Math.min(newX, rect.width));
+      newY = Math.max(0, Math.min(newY, rect.height));
+      
+      const newTime = chart.timeScale().coordinateToTime(newX);
+      const newPrice = candleSeries.coordinateToPrice(newY);
+      
+      if (newTime && newPrice && !isNaN(newTime) && !isNaN(newPrice)) {
+        const trendlines = getTrendlinesForSymbol(currentSymbol);
+        const trendlineIndex = trendlines.findIndex(t => t.id === selectedLine.data.id);
+        if (trendlineIndex >= 0) {
+          if (dragState.isStart) {
+            trendlines[trendlineIndex].startTime = newTime;
+            trendlines[trendlineIndex].startPrice = newPrice;
+            selectedLine.data.startTime = newTime;
+            selectedLine.data.startPrice = newPrice;
+          } else {
+            trendlines[trendlineIndex].endTime = newTime;
+            trendlines[trendlineIndex].endPrice = newPrice;
+            selectedLine.data.endTime = newTime;
+            selectedLine.data.endPrice = newPrice;
+          }
+          saveTrendlines();
+          drawTrendlinesOnChart();
+          // Update handles to new position
+          updateLineHandles();
+          log('✅ Trendline resized - new position saved');
+        }
+      } else {
+        log('⚠️ Drag position out of bounds - trendline not moved');
+      }
+    }
+    
+    // Reset drag state and cursor
+    if (dragState.handleElement && dragState.handleElement.parentNode) {
+      dragState.handleElement.style.cursor = 'grab';
+    }
+    dragState = { isDragging: false, handleElement: null, isStart: false };
+  });
+  
   function clearLineHandles() { 
+    // Reset cursor if actively dragging
+    if (dragState.handleElement) {
+      dragState.handleElement.style.cursor = 'grab';
+    }
+    
     lineHandles.forEach(h=>h.remove()); 
     lineHandles=[]; 
+    
+    // Completely reset drag state
+    dragState = { isDragging: false, handleElement: null, isStart: false };
   }
   
   // Track chart viewport changes to keep handles synchronized
