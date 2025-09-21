@@ -2,158 +2,210 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>EOD Watch — Minimal</title>
+  <title>EOD Watch — Pro</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Lightweight Charts -->
+  <!-- TradingView Lightweight Charts -->
   <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <style>
-    html, body { margin:0; padding:0; background:#0e1a24; color:#cbd5e1; height:100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    #app { display:flex; height:100%; }
-    #sidebar { width:250px; background:#0b1220; border-right:1px solid #1f2937; display:flex; flex-direction:column; }
-    #main { flex:1; display:flex; flex-direction:column; }
-    header { padding:8px 12px; border-bottom:1px solid #1f2937; display:flex; gap:8px; align-items:center; justify-content:space-between; }
-    #current-symbol { font-size:18px; font-weight:600; color:#60a5fa; }
-    #timeframes { display:flex; gap:4px; }
-    .timeframe-btn { background:#374151; color:#cbd5e1; border:0; border-radius:4px; padding:4px 8px; font-size:12px; cursor:pointer; }
-    .timeframe-btn.active { background:#1d4ed8; }
-    #chart { flex:1 1 auto; min-height: 520px; position:relative; }
+    :root{--bg:#0e1a24;--panel:#0f1b2b;--border:#1f2937;--text:#cbd5e1;--muted:#94a3b8;--accent:#3b82f6;--good:#4ade80;--bad:#ef4444;--warn:#f59e0b}
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    header{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px solid var(--border);background:linear-gradient(#0f1b2b,#0e1a24)}
+    input,button{background:#0b1522;border:1px solid #22314a;color:var(--text);border-radius:8px;padding:8px 10px}
+    button{cursor:pointer}
+    button.primary{background:var(--accent);border-color:var(--accent);color:white}
+    .btn-toggle.active{outline:2px solid var(--accent)}
+    .toolbar-sep{width:1px;height:24px;background:var(--border);margin:0 6px}
+    main{display:grid;grid-template-columns:1fr 320px;gap:10px;padding:10px;height:calc(100% - 56px)}
+    #board{grid-column:1/3;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:10px}
+    #board-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+    .mini{position:relative;background:#0f1b2b;border:1px solid var(--border);border-radius:8px;height:160px;overflow:hidden}
+    .mini .title{position:absolute;left:6px;top:4px;font-size:12px;color:var(--muted)}
+    .mini .enlarge{position:absolute;right:4px;top:4px;font-size:12px;padding:2px 6px;background:rgba(0,0,0,0.3);border-radius:4px;cursor:pointer}
+    #chart{background:var(--panel);border:1px solid var(--border);border-radius:10px;min-height:520px;position:relative}
     .drawing-mode #chart { cursor: crosshair; }
-    .loading-overlay { position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(14,26,36,0.8); display:none; align-items:center; justify-content:center; color:#60a5fa; font-size:14px; }
+    .loading-overlay { position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(14,26,36,0.8); display:none; align-items:center; justify-content:center; color:#60a5fa; font-size:14px; border-radius:10px; }
     .loading-overlay.show { display:flex; }
-    #log { padding:6px 12px; font-size:12px; border-top:1px solid #1f2937; color:#9ca3af; }
-    
-    /* Watchlist styles */
-    #watchlist-header { padding:12px; border-bottom:1px solid #1f2937; }
+    aside{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:10px;overflow:auto}
+    h3{margin:.25rem 0 .5rem 0;font-size:13px;color:var(--muted)}
+    .list .row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dashed #20304a}
+    .kill{background:transparent;border:none;color:#f87171;cursor:pointer;font-size:16px}
+    .status{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#0b1524;border:1px solid #22314a;border-radius:8px;padding:8px;white-space:pre-wrap;min-height:38px}
+    .chips{display:flex;gap:6px;flex-wrap:wrap}
+    .chip{padding:3px 6px;border-radius:999px;border:1px solid var(--border);font-size:12px}
+    .chip.good{border-color:#236a4d;color:#9ce8c0}
+    .chip.bad{border-color:#632828;color:#f3b0b0}
+    .chip.warn{border-color:#5a4517;color:#f6d399}
+
+    /* Watchlist styles (enhanced) */
+    #watchlist-section { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px; }
     #add-symbol { display:flex; gap:4px; margin-bottom:8px; }
     #new-symbol { flex:1; }
-    #watchlist { flex:1; overflow-y:auto; }
-    .symbol-item { padding:8px 12px; cursor:pointer; border-bottom:1px solid #1e293b; display:flex; justify-content:space-between; align-items:center; }
+    .symbol-item { padding:8px; cursor:pointer; border-bottom:1px dashed #20304a; display:flex; justify-content:space-between; align-items:center; border-radius:4px; margin-bottom:2px; }
     .symbol-item:hover { background:#1e293b; }
-    .symbol-item.active { background:#1d4ed8; }
+    .symbol-item.active { background:var(--accent); color:white; }
     .symbol-name { font-weight:500; }
-    .remove-btn { background:#dc2626; font-size:12px; padding:2px 6px; border-radius:3px; }
-    
-    /* Indicators */
-    #indicators { padding:8px 12px; border-bottom:1px solid #1f2937; }
-    .indicator-toggle { display:flex; align-items:center; gap:6px; margin-bottom:4px; font-size:12px; }
-    .toggle-switch { width:32px; height:16px; background:#374151; border-radius:8px; position:relative; cursor:pointer; }
-    .toggle-switch.active { background:#1d4ed8; }
-    .toggle-knob { width:12px; height:12px; background:#fff; border-radius:50%; position:absolute; top:2px; left:2px; transition:left 0.2s; }
-    .toggle-switch.active .toggle-knob { left:18px; }
-    
-    /* Drawing Tools */
-    #drawing-tools { padding:8px 12px; border-bottom:1px solid #1f2937; }
-    .tool-btn { background:#374151; color:#cbd5e1; border:0; border-radius:4px; padding:6px 8px; font-size:12px; cursor:pointer; margin-right:4px; margin-bottom:4px; }
-    .tool-btn.active { background:#1d4ed8; }
-    
-    /* Levels */
-    #levels { padding:8px 12px; flex:1; overflow-y:auto; }
-    .level-item { display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid #1e293b; }
-    .level-price { font-family:monospace; font-size:11px; color:#60a5fa; }
-    .level-controls { display:flex; gap:4px; }
-    .level-controls button { background:none; border:0; color:#9ca3af; cursor:pointer; padding:2px; }
-    .level-controls button:hover { color:#cbd5e1; }
-    
+    .remove-btn { background:var(--bad); font-size:12px; padding:2px 6px; border-radius:3px; border:none; color:white; }
+
+    /* Enhanced Drawing Tools */
+    .tool-section { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px; }
+    .tool-btn { background:#374151; color:var(--text); border:0; border-radius:6px; padding:6px 12px; font-size:12px; cursor:pointer; margin-right:6px; margin-bottom:4px; }
+    .tool-btn.active { background:var(--accent); box-shadow:0 0 8px rgba(59,130,246,0.4); }
+    .tool-btn:hover { transform:translateY(-1px); transition:transform 0.1s; }
+
+    /* Enhanced Indicators */
+    .indicator-toggle { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:12px; }
+    .toggle-switch { width:36px; height:18px; background:#374151; border-radius:10px; position:relative; cursor:pointer; transition:background 0.2s; }
+    .toggle-switch.active { background:var(--accent); }
+    .toggle-knob { width:14px; height:14px; background:#fff; border-radius:50%; position:absolute; top:2px; left:2px; transition:left 0.2s; }
+    .toggle-switch.active .toggle-knob { left:20px; }
+
+    /* Modal */
+    #modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.84);z-index:50;align-items:center;justify-content:center}
+    #modal .box{position:relative;width:92vw;height:86vh;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    #modal .close{position:absolute;right:10px;top:8px;z-index:2;background:var(--bad);color:white;border:none;border-radius:4px;padding:4px 8px;cursor:pointer}
+
     /* Status indicators */
     .status-dot { width:8px; height:8px; border-radius:50%; margin-right:6px; }
-    .status-connected { background:#10b981; }
-    .status-loading { background:#f59e0b; animation:pulse 1.5s infinite; }
-    .status-error { background:#dc2626; }
+    .status-connected { background:var(--good); }
+    .status-loading { background:var(--warn); animation:pulse 1.5s infinite; }
+    .status-error { background:var(--bad); }
     @keyframes pulse { 0%, 100% { opacity:1; } 50% { opacity:0.5; } }
-    
-    /* Improved hover states */
-    .symbol-item:hover, .tool-btn:hover, .timeframe-btn:hover { transform:translateY(-1px); transition:transform 0.1s; }
-    
-    /* Better visual feedback */
-    .tool-btn.active { box-shadow:0 0 8px rgba(29,78,216,0.4); }
-    
-    /* Line Controls */
-    #line-controls { padding:8px 12px; border-bottom:1px solid #1f2937; display:none; }
-    .color-picker { display:flex; gap:4px; margin:4px 0; }
-    .color-option { width:20px; height:20px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
-    .color-option.active { border-color:#60a5fa; }
+
+    /* Line Controls (enhanced) */
+    #line-controls { display:none; margin-top:10px; }
+    .color-picker { display:flex; gap:6px; margin:6px 0; }
+    .color-option { width:24px; height:24px; border-radius:6px; cursor:pointer; border:2px solid transparent; transition:transform 0.1s; }
+    .color-option.active { border-color:var(--accent); }
     .color-option:hover { transform:scale(1.1); }
-    
-    /* Responsive improvements */
-    @media (max-width: 768px) {
-      #sidebar { width:200px; }
-      .timeframe-btn { padding:3px 6px; font-size:11px; }
+
+    /* Responsive */
+    @media (max-width: 1200px) {
+      main { grid-template-columns:1fr 280px; }
+      #board-grid { grid-template-columns:repeat(4,1fr); }
     }
-    
-    button { background:#1d4ed8; color:#fff; border:0; border-radius:6px; padding:6px 10px; cursor:pointer; }
-    button:disabled { opacity:.5; cursor:not-allowed; }
-    input { background:#0b1220; color:#e5e7eb; border:1px solid #374151; border-radius:6px; padding:6px 8px; }
+    @media (max-width: 900px) {
+      main { grid-template-columns:1fr; }
+      aside { order:-1; }
+      #board { display:none; }
+    }
   </style>
 </head>
 <body>
-<div id="app">
-  <div id="sidebar">
-    <div id="watchlist-header">
-      <h3 style="margin:0 0 8px 0; font-size:14px; color:#9ca3af;">WATCHLIST</h3>
-      <div id="add-symbol">
-        <input id="new-symbol" placeholder="Add symbol..." />
-        <button id="add-btn">+</button>
-      </div>
+  <header>
+    <input id="ticker" placeholder="AAPL" value="AAPL" />
+    <button id="btnLoad" class="primary">Load</button>
+    <div class="toolbar-sep"></div>
+    <button class="tf btn-toggle" data-tf="4H">4H</button>
+    <button class="tf btn-toggle active" data-tf="1D">1D</button>
+    <button class="tf btn-toggle" data-tf="1W">1W</button>
+    <button class="tf btn-toggle" data-tf="1M">1M</button>
+    <div class="toolbar-sep"></div>
+    <button id="toolLevel" class="btn-toggle">+ Level</button>
+    <button id="toolTrend" class="btn-toggle">+ Trend (2-click)</button>
+    <div class="toolbar-sep"></div>
+    <button id="toggleEMA" class="btn-toggle">EMA200</button>
+    <button id="toggleBB" class="btn-toggle">BB(20,2)</button>
+    <div class="toolbar-sep"></div>
+    <div style="display:flex; align-items:center;">
+      <div class="status-dot status-connected" id="status-dot"></div>
+      <span id="topStatus" style="margin-left:6px;color:var(--muted)">Ready</span>
     </div>
-    <div id="watchlist"></div>
-    <div id="indicators">
-      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">INDICATORS</h4>
-      <div class="indicator-toggle">
-        <div class="toggle-switch active" id="ema-toggle">
-          <div class="toggle-knob"></div>
-        </div>
-        <span>EMA(200)</span>
+  </header>
+
+  <main>
+    <!-- 10-chart board -->
+    <section id="board">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="color:var(--muted);font-size:13px">WATCHLIST BOARD</div>
+        <div id="boardHint" style="color:var(--muted);font-size:12px">Click mini to load main · ⤢ to enlarge</div>
       </div>
-      <div class="indicator-toggle">
-        <div class="toggle-switch" id="bb-toggle">
-          <div class="toggle-knob"></div>
-        </div>
-        <span>BB(20,2)</span>
-      </div>
-    </div>
-    <div id="drawing-tools">
-      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">DRAWING</h4>
-      <button class="tool-btn" id="level-tool">Level</button>
-      <button class="tool-btn" id="trendline-tool">Trendline</button>
-      <button class="tool-btn" id="clear-all">Clear</button>
-    </div>
-    <div id="line-controls">
-      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">LINE OPTIONS</h4>
-      <div class="color-picker">
-        <div class="color-option" style="background:#60a5fa" data-color="#60a5fa" title="Blue"></div>
-        <div class="color-option" style="background:#f59e0b" data-color="#f59e0b" title="Orange"></div>
-        <div class="color-option" style="background:#10b981" data-color="#10b981" title="Green"></div>
-        <div class="color-option" style="background:#ef4444" data-color="#ef4444" title="Red"></div>
-        <div class="color-option" style="background:#8b5cf6" data-color="#8b5cf6" title="Purple"></div>
-        <div class="color-option" style="background:#f97316" data-color="#f97316" title="Yellow"></div>
-      </div>
-      <button class="tool-btn" id="delete-line" style="background:#dc2626; width:100%; margin-top:4px;">Delete Selected Line</button>
-    </div>
-    <div id="levels">
-      <h4 style="margin:0 0 8px 0; font-size:12px; color:#9ca3af;">LEVELS</h4>
-      <div id="levels-list"></div>
-    </div>
-  </div>
-  <div id="main">
-    <header>
-      <div style="display:flex; align-items:center;">
-        <div class="status-dot status-connected" id="status-dot"></div>
-        <div id="current-symbol">AAPL</div>
-      </div>
-      <div id="timeframes">
-        <button class="timeframe-btn active" data-tf="1D">1D</button>
-        <button class="timeframe-btn" data-tf="1W" title="Weekly aggregation (Phase 3)">1W</button>
-        <button class="timeframe-btn" data-tf="1M" title="Monthly aggregation (Phase 3)">1M</button>
-      </div>
-    </header>
-    <div id="chart">
+      <div id="board-grid"></div>
+    </section>
+
+    <!-- main chart -->
+    <section id="chart">
       <div class="loading-overlay" id="loading-overlay">
         <div>Loading chart data...</div>
       </div>
+    </section>
+
+    <!-- side panel -->
+    <aside>
+      <div id="watchlist-section">
+        <h3>WATCHLIST</h3>
+        <div id="add-symbol">
+          <input id="new-symbol" placeholder="Add symbol..." />
+          <button id="add-btn">+</button>
+        </div>
+        <div id="watchlist"></div>
+      </div>
+
+      <div class="tool-section">
+        <h3>INDICATORS</h3>
+        <div class="indicator-toggle">
+          <div class="toggle-switch active" id="ema-toggle">
+            <div class="toggle-knob"></div>
+          </div>
+          <span>EMA(200)</span>
+        </div>
+        <div class="indicator-toggle">
+          <div class="toggle-switch" id="bb-toggle">
+            <div class="toggle-knob"></div>
+          </div>
+          <span>BB(20,2)</span>
+        </div>
+      </div>
+
+      <div class="tool-section">
+        <h3>DRAWING TOOLS</h3>
+        <button class="tool-btn" id="level-tool">Level</button>
+        <button class="tool-btn" id="trendline-tool">Trendline</button>
+        <button class="tool-btn" id="clear-all">Clear All</button>
+        
+        <div id="line-controls">
+          <h3>LINE OPTIONS</h3>
+          <div class="color-picker">
+            <div class="color-option" style="background:#60a5fa" data-color="#60a5fa" title="Blue"></div>
+            <div class="color-option" style="background:#f59e0b" data-color="#f59e0b" title="Orange"></div>
+            <div class="color-option" style="background:#10b981" data-color="#10b981" title="Green"></div>
+            <div class="color-option" style="background:#ef4444" data-color="#ef4444" title="Red"></div>
+            <div class="color-option" style="background:#8b5cf6" data-color="#8b5cf6" title="Purple"></div>
+            <div class="color-option" style="background:#f97316" data-color="#f97316" title="Yellow"></div>
+          </div>
+          <button class="tool-btn" id="delete-line" style="background:var(--bad); width:100%; margin-top:4px;">Delete Selected Line</button>
+        </div>
+      </div>
+
+      <div>
+        <h3>Signals</h3>
+        <div id="chips" class="chips"></div>
+      </div>
+      
+      <div>
+        <h3>Levels</h3>
+        <div id="levels" class="list"></div>
+      </div>
+      
+      <div>
+        <h3>Trendlines</h3>
+        <div id="trends" class="list"></div>
+      </div>
+      
+      <div>
+        <h3>Log</h3>
+        <div id="log" class="status">—</div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- fullscreen modal -->
+  <div id="modal">
+    <div class="box">
+      <button class="close">✕</button>
+      <div id="modalCanvas" style="position:absolute;inset:0"></div>
     </div>
-    <div id="log">—</div>
   </div>
-</div>
 
 <script>
 (function () {

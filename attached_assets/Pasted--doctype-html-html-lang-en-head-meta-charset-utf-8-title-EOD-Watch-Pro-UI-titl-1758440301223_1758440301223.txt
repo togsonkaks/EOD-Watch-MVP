@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>EOD Watch — Pro UI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- TradingView Lightweight Charts -->
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    :root{--bg:#0e1a24;--panel:#0f1b2b;--border:#1f2937;--text:#cbd5e1;--muted:#94a3b8;--accent:#3b82f6;--good:#4ade80;--bad:#ef4444;--warn:#f59e0b}
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    header{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px solid var(--border);background:linear-gradient(#0f1b2b,#0e1a24)}
+    input,button{background:#0b1522;border:1px solid #22314a;color:var(--text);border-radius:8px;padding:8px 10px}
+    button{cursor:pointer}
+    button.primary{background:var(--accent);border-color:var(--accent);color:white}
+    .btn-toggle.active{outline:2px solid var(--accent)}
+    .toolbar-sep{width:1px;height:24px;background:var(--border);margin:0 6px}
+    main{display:grid;grid-template-columns:1fr 320px;gap:10px;padding:10px;height:calc(100% - 56px)}
+    #board{grid-column:1/3;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px}
+    #board-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+    .mini{position:relative;background:#0f1b2b;border:1px solid var(--border);border-radius:8px;height:160px;overflow:hidden}
+    .mini .title{position:absolute;left:6px;top:4px;font-size:12px;color:var(--muted)}
+    .mini .enlarge{position:absolute;right:4px;top:4px;font-size:12px;padding:2px 6px}
+    #chart{background:var(--panel);border:1px solid var(--border);border-radius:10px;min-height:520px}
+    aside{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:10px;overflow:auto}
+    h3{margin:.25rem 0 .5rem 0;font-size:13px;color:var(--muted)}
+    .list .row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dashed #20304a}
+    .kill{background:transparent;border:none;color:#f87171;cursor:pointer;font-size:16px}
+    .status{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#0b1524;border:1px solid #22314a;border-radius:8px;padding:8px;white-space:pre-wrap;min-height:38px}
+    .chips{display:flex;gap:6px;flex-wrap:wrap}
+    .chip{padding:3px 6px;border-radius:999px;border:1px solid var(--border);font-size:12px}
+    .chip.good{border-color:#236a4d;color:#9ce8c0}
+    .chip.bad{border-color:#632828;color:#f3b0b0}
+    .chip.warn{border-color:#5a4517;color:#f6d399}
+    /* Modal */
+    #modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.84);z-index:50;align-items:center;justify-content:center}
+    #modal .box{position:relative;width:92vw;height:86vh;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    #modal .close{position:absolute;right:10px;top:8px;z-index:2}
+  </style>
+</head>
+<body>
+  <header>
+    <input id="ticker" placeholder="AAPL" value="AAPL" />
+    <button id="btnLoad" class="primary">Load</button>
+    <div class="toolbar-sep"></div>
+    <button class="tf btn-toggle" data-tf="4H">4H</button>
+    <button class="tf btn-toggle active" data-tf="1D">1D</button>
+    <button class="tf btn-toggle" data-tf="1W">1W</button>
+    <button class="tf btn-toggle" data-tf="1M">1M</button>
+    <div class="toolbar-sep"></div>
+    <button id="toolLevel" class="btn-toggle">+ Level</button>
+    <button id="toolTrend" class="btn-toggle">+ Trend (2-click)</button>
+    <div class="toolbar-sep"></div>
+    <button id="toggleEMA" class="btn-toggle">EMA200</button>
+    <span id="topStatus" style="margin-left:6px;color:var(--muted)">Ready</span>
+  </header>
+
+  <main>
+    <!-- 10-chart board -->
+    <section id="board">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="color:var(--muted);font-size:13px">BOARD (Top 10)</div>
+        <div id="boardHint" style="color:var(--muted);font-size:12px">Click mini to load main · ⤢ to enlarge</div>
+      </div>
+      <div id="board-grid"></div>
+    </section>
+
+    <!-- main chart -->
+    <section id="chart"></section>
+
+    <!-- side panel -->
+    <aside>
+      <div>
+        <h3>Signals</h3>
+        <div id="chips" class="chips"></div>
+      </div>
+      <div>
+        <h3>Levels</h3>
+        <div id="levels" class="list"></div>
+      </div>
+      <div>
+        <h3>Trendlines</h3>
+        <div id="trends" class="list"></div>
+      </div>
+      <div>
+        <h3>Log</h3>
+        <div id="log" class="status">—</div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- fullscreen modal -->
+  <div id="modal">
+    <div class="box">
+      <button class="close">✕</button>
+      <div id="modalCanvas" style="position:absolute;inset:0"></div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // --- Config ---
+  const API = ''; // same-origin Express proxy. If serving UI elsewhere, set 'http://localhost:3000'
+  const DEFAULT_WATCHLIST = ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA','META','AMD','GOOGL','IWM'];
+
+  // --- Shorthands ---
+  const $ = (s)=>document.querySelector(s);
+  const $$ = (s)=>document.querySelectorAll(s);
+  const log = (m)=>{ $('#log').textContent = m; console.log('[EOD]', m); };
+  const chip = (txt, cls)=>{ const d=document.createElement('div'); d.className='chip '+(cls||''); d.textContent=txt; return d; };
+
+  // --- State ---
+  let currentSymbol = 'AAPL';
+  let currentTF = '1D';
+  let dailyBars = [];   // raw daily from /eod
+  let tfBars = [];      // current timeframe bars
+  let drawingMode = false;
+  let drawingTool = null;     // 'level' | 'trendline'
+  let trendStart = null;      // {time, price}
+  let emaOn = false;
+
+  // Persisted drawings
+  function keyLevels(sym, tf) { return `eodwatch:${sym}:${tf}:levels`; }
+  function keyTrends(sym, tf) { return `eodwatch:${sym}:${tf}:trends`; }
+  function loadLevels(sym, tf){ try { return JSON.parse(localStorage.getItem(keyLevels(sym,tf))||'[]'); } catch { return []; } }
+  function loadTrends(sym, tf){ try { return JSON.parse(localStorage.getItem(keyTrends(sym,tf))||'[]'); } catch { return []; } }
+  function saveLevels(sym, tf, arr){ localStorage.setItem(keyLevels(sym,tf), JSON.stringify(arr)); }
+  function saveTrends(sym, tf, arr){ localStorage.setItem(keyTrends(sym,tf), JSON.stringify(arr)); }
+
+  let levels = [];        // [{id,price,color}]
+  let trends = [];        // [{id,startTime,startPrice,endTime,endPrice,color}]
+  let priceLines = [];    // live chart price lines
+  let trendSeries = [];   // live chart line series
+
+  // --- Chart bootstrap (main) ---
+  const chart = LightweightCharts.createChart($('#chart'), {
+    layout:{ background:{ color:'#0f1b2b' }, textColor:'#cbd5e1' },
+    rightPriceScale:{ borderVisible:false },
+    timeScale:{ borderColor:'#22314a' },
+    grid:{ vertLines:{ color:'#132032' }, horzLines:{ color:'#132032' } },
+    autoSize:true
+  });
+  const candle = chart.addCandlestickSeries({
+    upColor: getComputedStyle(document.documentElement).getPropertyValue('--good').trim() || '#4ade80',
+    downColor: getComputedStyle(document.documentElement).getPropertyValue('--bad').trim() || '#ef4444',
+    wickUpColor:'#4ade80', wickDownColor:'#ef4444', borderVisible:false
+  });
+  const emaSeries = chart.addLineSeries({ color:'#60a5fa', lineWidth:2 });
+  let bbUpperSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
+  let bbMiddleSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
+  let bbLowerSeries = chart.addLineSeries({ color:'#6b7280', lineWidth:1 });
+
+  // --- Indicators ---
+  function emaFromBars(bars, period=200){
+    if (!bars?.length) return [];
+    const k = 2/(period+1);
+    let e = bars[0].close;
+    const out = [{ time: bars[0].time, value: e }];
+    for (let i=1;i<bars.length;i++){
+      e = bars[i].close*k + e*(1-k);
+      out.push({ time: bars[i].time, value: e });
+    }
+    return out;
+  }
+  function sma(arr, n){
+    const out=[]; let sum=0;
+    for (let i=0;i<arr.length;i++){
+      sum+=arr[i];
+      if(i>=n) sum-=arr[i-n];
+      if(i>=n-1) out.push(sum/n);
+      else out.push(null);
+    }
+    return out;
+  }
+  function bollingerBands(bars, period=20, mult=2){
+    const closes = bars.map(b=>b.close);
+    const mid = sma(closes, period);
+    const outU=[], outM=[], outL=[];
+    for (let i=0;i<bars.length;i++){
+      const m = mid[i];
+      if (m==null){ outU.push(null); outM.push(null); outL.push(null); continue; }
+      const win = closes.slice(Math.max(0,i-period+1), i+1);
+      const mean = m;
+      const variance = win.reduce((s,v)=>s+Math.pow(v-mean,2),0)/win.length;
+      const sd = Math.sqrt(variance);
+      outU.push({ time: bars[i].time, value: mean + mult*sd });
+      outM.push({ time: bars[i].time, value: mean });
+      outL.push({ time: bars[i].time, value: mean - mult*sd });
+    }
+    return { upper: outU.filter(Boolean), middle: outM.filter(Boolean), lower: outL.filter(Boolean) };
+  }
+
+  // --- Resampling (weekly/monthly) ---
+  function resampleWeekly(daily){
+    if (!daily.length) return [];
+    const out=[]; let cur=null, wk=null;
+    const isoWeek = (t)=>{ const d=new Date(t*1000); d.setUTCHours(0,0,0,0);
+      const day=(d.getUTCDay()+6)%7; d.setUTCDate(d.getUTCDate()-day+3);
+      const firstThu=new Date(Date.UTC(d.getUTCFullYear(),0,4));
+      const week=1+Math.round(((d-firstThu)/86400000-3+((firstThu.getUTCDay()+6)%7))/7);
+      return d.getUTCFullYear()+"-"+week; };
+    for(const b of daily){ const w=isoWeek(b.time);
+      if(w!==wk){ if(cur) out.push(cur); cur={...b}; wk=w; }
+      else { cur.high=Math.max(cur.high,b.high); cur.low=Math.min(cur.low,b.low); cur.close=b.close; }
+    } if(cur) out.push(cur); return out;
+  }
+  function resampleMonthly(daily){
+    if (!daily.length) return [];
+    const out=[]; let cur=null, key=null;
+    const mKey=(t)=>{ const d=new Date(t*1000); return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,'0'); };
+    for(const b of daily){ const k=mKey(b.time);
+      if(k!==key){ if(cur) out.push(cur); cur={...b}; key=k; }
+      else { cur.high=Math.max(cur.high,b.high); cur.low=Math.min(cur.low,b.low); cur.close=b.close; }
+    } if(cur) out.push(cur); return out;
+  }
+
+  // --- Drawings: Levels ---
+  function refreshLevelsPanel(){
+    const box=$('#levels'); box.innerHTML='';
+    levels.forEach((lv, idx)=>{
+      const row=document.createElement('div'); row.className='row';
+      row.innerHTML=`<span>${lv.price.toFixed(2)}</span>`;
+      const del=document.createElement('button'); del.className='kill'; del.textContent='✕';
+      del.onclick=()=>{ levels.splice(idx,1); saveLevels(currentSymbol,currentTF,levels); drawLevels(); refreshLevelsPanel(); };
+      row.appendChild(del); box.appendChild(row);
+    });
+  }
+  function drawLevels(){
+    // remove old lines
+    priceLines.forEach(pl=>{ try{candle.removePriceLine(pl);}catch{} });
+    priceLines=[];
+    // add current
+    levels.forEach(lv=>{
+      const line=candle.createPriceLine({
+        price:lv.price, color:lv.color||'#60a5fa', lineWidth:2,
+        lineStyle:LightweightCharts.LineStyle.Dashed, axisLabelVisible:true, title:`${lv.price.toFixed(2)}`
+      });
+      priceLines.push(line);
+    });
+  }
+  function addLevel(price){
+    levels.push({ id:'L'+Date.now(), price, color:'#60a5fa' });
+    saveLevels(currentSymbol,currentTF,levels);
+    drawLevels(); refreshLevelsPanel();
+  }
+
+  // --- Drawings: Trendlines ---
+  function refreshTrendsPanel(){
+    const box=$('#trends'); box.innerHTML='';
+    trends.forEach((tr, idx)=>{
+      const row=document.createElement('div'); row.className='row';
+      const t1=new Date(tr.startTime*1000).toISOString().slice(0,10);
+      const t2=new Date(tr.endTime*1000).toISOString().slice(0,10);
+      row.innerHTML=`<span>${t1} → ${t2}</span>`;
+      const del=document.createElement('button'); del.className='kill'; del.textContent='✕';
+      del.onclick=()=>{ trends.splice(idx,1); saveTrends(currentSymbol,currentTF,trends); drawTrends(); refreshTrendsPanel(); };
+      row.appendChild(del); box.appendChild(row);
+    });
+  }
+  function drawTrends(){
+    trendSeries.forEach(s=>{ try{chart.removeSeries(s);}catch{} });
+    trendSeries=[];
+    trends.forEach(tr=>{
+      const s=chart.addLineSeries({ color: tr.color||'#f59e0b', lineWidth:2 });
+      s.setData([{time:tr.startTime, value:tr.startPrice},{time:tr.endTime, value:tr.endPrice}]);
+      trendSeries.push(s);
+    });
+  }
+  function addTrend(start, end){
+    trends.push({ id:'T'+Date.now(), startTime:start.time, startPrice:start.price, endTime:end.time, endPrice:end.price, color:'#f59e0b' });
+    saveTrends(currentSymbol,currentTF,trends);
+    drawTrends(); refreshTrendsPanel();
+  }
+
+  // --- Cross logic ---
+  function crossed(prevA, prevB, curA, curB){
+    if ([prevA,prevB,curA,curB].some(v=>!Number.isFinite(v))) return false;
+    const d1=prevA-prevB, d2=curA-curB;
+    return (d1>0 && d2<0) || (d1<0 && d2>0);
+  }
+  function valueOnTrendAt(tr, t){
+    if (tr.endTime===tr.startTime) return tr.startPrice;
+    const m=(tr.endPrice-tr.startPrice)/(tr.endTime-tr.startTime);
+    return tr.startPrice + m*(t-tr.startTime);
+  }
+  function evaluateCrosses(bars, emaArr){
+    const out={ chips:[] };
+    if (bars.length<2) return out;
+    const b2=bars[bars.length-2], b1=bars[bars.length-1];
+
+    // EMA200
+    if (emaOn && emaArr?.length>=2){
+      const e2=emaArr[emaArr.length-2].value, e1=emaArr[emaArr.length-1].value;
+      if (crossed(b2.close, e2, b1.close, e1)) {
+        out.chips.push( (b1.close>e1) ? chip('EMA200 ↑','good') : chip('EMA200 ↓','bad') );
+      } else {
+        out.chips.push( (b1.close>=e1) ? chip('Above EMA200','good') : chip('Below EMA200','bad') );
+      }
+    }
+
+    // Levels
+    const nearBps = 30; // 0.30%
+    levels.forEach(lv=>{
+      if (crossed(b2.close, lv.price, b1.close, lv.price)){
+        out.chips.push( (b1.close>lv.price) ? chip(`Level ${lv.price.toFixed(2)} ↑`,'good') : chip(`Level ${lv.price.toFixed(2)} ↓`,'bad') );
+      } else {
+        const dist = Math.abs(b1.close - lv.price)/lv.price*10000; // bps
+        if (dist <= nearBps) out.chips.push(chip(`Near ${lv.price.toFixed(2)} (${dist.toFixed(0)}bps)`,'warn'));
+      }
+    });
+
+    // Trendlines
+    trends.forEach(tr=>{
+      const y2=valueOnTrendAt(tr, b2.time), y1=valueOnTrendAt(tr, b1.time);
+      if (Number.isFinite(y2)&&Number.isFinite(y1) && crossed(b2.close,y2,b1.close,y1)){
+        out.chips.push( (b1.close>y1) ? chip('Trend ↑','good') : chip('Trend ↓','bad') );
+      }
+    });
+
+    return out;
+  }
+  function renderChips(out){
+    const box=$('#chips'); box.innerHTML=''; out.chips.forEach(c=>box.appendChild(c));
+  }
+
+  // --- Fetch data ---
+  async function fetchBars(symbol, days=4000){
+    const r = await fetch(`${API}/eod?symbol=${encodeURIComponent(symbol)}&days=${days}`);
+    if (!r.ok){ const t=await r.text(); log(`HTTP ${r.status}\n${t}`); return []; }
+    const j = await r.json();
+    return j.data || [];
+  }
+
+  // --- TF management ---
+  function applyTF(tf, firstLoad=false){
+    currentTF = tf;
+    let bars = dailyBars;
+    if (tf==='1W') bars = resampleWeekly(dailyBars);
+    else if (tf==='1M') bars = resampleMonthly(dailyBars);
+    else if (tf==='4H') { console.warn('4H requires intraday. Showing daily until intraday endpoint is added.'); bars = dailyBars; }
+
+    tfBars = bars;
+    candle.setData(bars);
+
+    // indicators
+    let emaArr = [];
+    if (emaOn){
+      emaArr = emaFromBars(bars,200);
+      emaSeries.setData(emaArr);
+    } else {
+      emaSeries.setData([]);
+    }
+
+    // redraw drawings for this sym+tf
+    levels = loadLevels(currentSymbol,currentTF);
+    trends = loadTrends(currentSymbol,currentTF);
+    drawLevels(); refreshLevelsPanel();
+    drawTrends(); refreshTrendsPanel();
+
+    chart.timeScale().fitContent();
+
+    // chips
+    renderChips(evaluateCrosses(bars, emaArr));
+    if (!firstLoad) $('#topStatus').textContent = `${currentSymbol} · ${currentTF}`;
+  }
+
+  async function loadSymbol(sym){
+    currentSymbol = sym.toUpperCase();
+    $('#topStatus').textContent = `Loading ${currentSymbol}…`;
+    const bars = await fetchBars(currentSymbol, 4000);
+    if (!bars.length){ log('No data'); return; }
+    dailyBars = bars;
+    applyTF(currentTF, true);
+    $('#topStatus').textContent = `${currentSymbol} · ${currentTF} · ${bars.length} bars`;
+  }
+
+  // --- Tools wiring ---
+  $('#btnLoad').onclick = ()=> loadSymbol($('#ticker').value.trim()||'AAPL');
+  $$('.tf').forEach(b=>b.addEventListener('click', ()=>{
+    $$('.tf').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    applyTF(b.dataset.tf);
+  }));
+  $('#toggleEMA').onclick = ()=>{ emaOn=!emaOn; $('#toggleEMA').classList.toggle('active', emaOn); applyTF(currentTF); };
+
+  // Levels: click to add at mouse
+  $('#toolLevel').onclick = ()=>{
+    const active = !$('#toolLevel').classList.contains('active');
+    drawingMode = active; drawingTool = active?'level':null; trendStart=null;
+    $('#toolLevel').classList.toggle('active', active);
+    $('#toolTrend').classList.remove('active');
+    $('#topStatus').textContent = active? 'Click chart to place a level' : 'Ready';
+  };
+
+  // Trendlines: two clicks
+  $('#toolTrend').onclick = ()=>{
+    const active = !$('#toolTrend').classList.contains('active');
+    drawingMode = active; drawingTool = active?'trendline':null; trendStart=null;
+    $('#toolTrend').classList.toggle('active', active);
+    $('#toolLevel').classList.remove('active');
+    $('#topStatus').textContent = active? 'Click first point' : 'Ready';
+  };
+
+  chart.subscribeClick((p)=>{
+    if (!drawingMode || !p?.point) return;
+    const price = candle.coordinateToPrice(p.point.y);
+    const time  = chart.timeScale().coordinateToTime(p.point.x);
+    if (!Number.isFinite(price) || time==null) return;
+
+    if (drawingTool==='level'){
+      addLevel(price);
+      drawingMode=false; $('#toolLevel').classList.remove('active'); $('#topStatus').textContent='Level added';
+    } else if (drawingTool==='trendline'){
+      if (!trendStart){ trendStart={time,price}; $('#topStatus').textContent='First set. Click second point.'; }
+      else { addTrend(trendStart,{time,price}); trendStart=null; drawingMode=false; $('#toolTrend').classList.remove('active'); $('#topStatus').textContent='Trendline added'; }
+    }
+  });
+
+  // --- Board (10 minis + enlarge) ---
+  async function buildBoard(symbols=DEFAULT_WATCHLIST){
+    const grid = $('#board-grid'); grid.innerHTML='';
+    for (const sym of symbols.slice(0,10)){
+      const cell = document.createElement('div'); cell.className='mini';
+      const title = document.createElement('div'); title.className='title'; title.textContent=sym;
+      const canvas = document.createElement('div'); canvas.style.position='absolute'; canvas.style.left=0; canvas.style.right=0; canvas.style.bottom=0; canvas.style.top='20px';
+      const enlarge = document.createElement('button'); enlarge.className='enlarge'; enlarge.textContent='⤢';
+      cell.append(title, canvas, enlarge); grid.appendChild(cell);
+
+      const mini = LightweightCharts.createChart(canvas,{
+        layout:{ background:{ color:'#0f1b2b' }, textColor:'#cbd5e1' },
+        rightPriceScale:{ borderVisible:false }, timeScale:{ borderVisible:false },
+        grid:{ vertLines:{ color:'#0f1b2b' }, horzLines:{ color:'#0f1b2b' } }
+      });
+      const s = mini.addCandlestickSeries({ upColor:'#4ade80', downColor:'#ef4444', borderVisible:false, wickUpColor:'#4ade80', wickDownColor:'#ef4444' });
+      fetchBars(sym, 800).then(b=>{ s.setData(b.slice(-260)); mini.timeScale().fitContent(); });
+
+      canvas.onclick = ()=>loadSymbol(sym);
+      enlarge.onclick = ()=>openModal(sym);
+    }
+  }
+
+  function openModal(sym){
+    const modal=$('#modal'); const host=$('#modalCanvas');
+    host.innerHTML=''; modal.style.display='flex';
+    const big = LightweightCharts.createChart(host,{
+      layout:{ background:{ color:'#0f1b2b' }, textColor:'#cbd5e1' },
+      rightPriceScale:{ borderVisible:false }, timeScale:{ borderVisible:false }
+    });
+    const s = big.addCandlestickSeries();
+    fetchBars(sym, 2000).then(b=>{ s.setData(b); big.timeScale().fitContent(); });
+    $('#modal .close').onclick = ()=>{ modal.style.display='none'; big.remove(); };
+  }
+
+  // --- Boot ---
+  fetch(`${API}/healthz`).then(r=>r.ok?log('Backend OK'):log('Backend NOT OK')).catch(e=>log('Backend error: '+e.message));
+  buildBoard();
+  loadSymbol('AAPL');
+})();
+</script>
+</body>
+</html>
