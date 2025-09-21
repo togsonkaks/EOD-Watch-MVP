@@ -1073,6 +1073,8 @@
   }
 
   // ---- Chart Interaction
+  let levelDragState = { isDragging: false, draggedLevel: null, startY: null };
+  
   function setupChartInteraction() {
     chart.subscribeClick(param => {
       if (param.point) {
@@ -1086,6 +1088,12 @@
             if (clickedLine) {
               selectLine(clickedLine);
               log(`Selected ${clickedLine.type} line`);
+              
+              // For level lines, also initiate dragging capability
+              if (clickedLine.type === 'level') {
+                levelDragState.draggedLevel = clickedLine;
+                levelDragState.startY = param.point.y;
+              }
               return;
             } else {
               // Clicked on empty space - deselect current line
@@ -1101,6 +1109,10 @@
           if (drawingMode && drawingTool === 'level') {
             addLevel(price);
             log(`Level added at ${price.toFixed(2)}`);
+            // Auto-disable drawing mode after completing level
+            drawingMode = false;
+            $('#level-tool').classList.remove('active');
+            document.body.classList.remove('drawing-mode');
           } else if (drawingMode && drawingTool === 'trendline') {
             if (!trendlineStart) {
               // First click: set start point
@@ -1112,6 +1124,10 @@
               disableTrendlinePreview();
               addTrendline(trendlineStart.time, trendlineStart.price, time, price);
               log(`Trendline added from ${trendlineStart.price.toFixed(2)} to ${price.toFixed(2)}`);
+              // Auto-disable drawing mode after completing trendline
+              drawingMode = false;
+              $('#trendline-tool').classList.remove('active');
+              document.body.classList.remove('drawing-mode');
               trendlineStart = null;
             }
           }
@@ -1119,7 +1135,7 @@
       }
     });
 
-    // Subscribe to mouse move for trendline preview
+    // Subscribe to mouse move for trendline preview and level line dragging
     let chartContainer = document.getElementById('chart');
     chartContainer.addEventListener('mousemove', (event) => {
       if (drawingMode && drawingTool === 'trendline' && trendlineStart && previewTrendline) {
@@ -1132,17 +1148,85 @@
           updateTrendlinePreview(time, price);
         }
       }
+      
+      // Handle level line dragging when clicking anywhere on the horizontal line
+      if (levelDragState.isDragging && levelDragState.draggedLevel) {
+        const rect = chartContainer.getBoundingClientRect();
+        const newY = event.clientY - rect.top;
+        const newPrice = candleSeries.coordinateToPrice(newY);
+        
+        if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
+          // Update the level price in real-time
+          const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+          const levelIndex = symbolLevels.findIndex(l => l.id === levelDragState.draggedLevel.data.id);
+          if (levelIndex >= 0) {
+            symbolLevels[levelIndex].price = newPrice;
+            levelDragState.draggedLevel.data.price = newPrice;
+            
+            // Real-time visual update
+            try {
+              saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
+              drawLevelsOnChart();
+              updateLineHandles();
+            } catch (error) {
+              console.warn('[EOD] Error during level line drag:', error);
+            }
+          }
+        }
+      }
+    });
+    
+    // Add mousedown event for level line dragging
+    chartContainer.addEventListener('mousedown', (event) => {
+      if (!drawingMode && selectedLine && selectedLine.type === 'level') {
+        const rect = chartContainer.getBoundingClientRect();
+        const clickX = event.clientX - rect.left;
+        const clickY = event.clientY - rect.top;
+        
+        // Check if clicking on the selected level line
+        const clickedLine = findLineNearClick(clickX, clickY);
+        if (clickedLine && clickedLine.data.id === selectedLine.data.id) {
+          levelDragState.isDragging = true;
+          levelDragState.draggedLevel = clickedLine;
+          levelDragState.startY = clickY;
+          chartContainer.style.cursor = 'ns-resize';
+          event.preventDefault();
+        }
+      }
+    });
+    
+    // Add mouseup event for level line dragging
+    chartContainer.addEventListener('mouseup', (event) => {
+      if (levelDragState.isDragging) {
+        const rect = chartContainer.getBoundingClientRect();
+        const newY = event.clientY - rect.top;
+        const newPrice = candleSeries.coordinateToPrice(newY);
+        
+        if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
+          log(`✅ Level moved to ${newPrice.toFixed(2)} via full-line drag`);
+        } else {
+          log('⚠️ Drag position out of bounds - level not moved');
+        }
+        
+        levelDragState.isDragging = false;
+        levelDragState.draggedLevel = null;
+        levelDragState.startY = null;
+        chartContainer.style.cursor = '';
+      }
     });
   }
 
   // Line detection for selection (approximate hit testing)
   function findLineNearClick(clickX, clickY, tolerance = 8) {
     // Check horizontal levels first (easier calculation)
+    // For levels, make the entire horizontal line clickable across the chart width
     for (let level of currentLevels) {
       if (level._levelData) {
         // Get Y coordinate of the level line
         const levelY = candleSeries.priceToCoordinate(level._levelData.price);
         if (levelY !== null && Math.abs(clickY - levelY) <= tolerance) {
+          // For horizontal level lines, we accept clicks anywhere along the horizontal line
+          // across the entire chart width, so no need to check X coordinate
           return { type: 'level', data: level._levelData, series: level };
         }
       }
