@@ -124,6 +124,126 @@
       aside { order:-1; }
       #board { display:none; }
     }
+
+    /* Alert Modal Styles */
+    .alert-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+
+    .alert-modal-content {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0;
+      min-width: 320px;
+      max-width: 420px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    .alert-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .alert-modal-header h3 {
+      margin: 0;
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .alert-modal-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+      line-height: 1;
+    }
+
+    .alert-modal-close:hover {
+      background: var(--border);
+      color: var(--text);
+    }
+
+    .alert-modal-body {
+      padding: 20px;
+    }
+
+    .alert-info {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .alert-options {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .alert-btn {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-size: 14px;
+      width: 100%;
+    }
+
+    .alert-btn:hover {
+      border-color: var(--accent);
+      background: rgba(59, 130, 246, 0.1);
+    }
+
+    .alert-btn-green:hover {
+      border-color: var(--good);
+      background: rgba(74, 222, 128, 0.1);
+    }
+
+    .alert-btn-red:hover {
+      border-color: var(--bad);
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    .alert-icon {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .alert-text {
+      flex: 1;
+      font-weight: 500;
+    }
+
+    .alert-price {
+      font-weight: 600;
+      color: var(--accent);
+    }
   </style>
 </head>
 <body>
@@ -255,6 +375,35 @@
     </div>
   </div>
 
+  <!-- Alert Setup Modal -->
+  <div id="alert-modal" class="alert-modal" style="display: none;">
+    <div class="alert-modal-content">
+      <div class="alert-modal-header">
+        <h3 id="alert-modal-title">Set Alert</h3>
+        <span class="alert-modal-close" onclick="closeAlertModal()">&times;</span>
+      </div>
+      <div class="alert-modal-body">
+        <div id="alert-line-info" class="alert-info"></div>
+        <div class="alert-options">
+          <div class="alert-option">
+            <button id="alert-above-btn" class="alert-btn alert-btn-green" onclick="setAlertDirection('above')">
+              <span class="alert-icon">▲</span>
+              <span class="alert-text">Close Above</span>
+              <span id="alert-above-price" class="alert-price"></span>
+            </button>
+          </div>
+          <div class="alert-option">
+            <button id="alert-below-btn" class="alert-btn alert-btn-red" onclick="setAlertDirection('below')">
+              <span class="alert-icon">▼</span>
+              <span class="alert-text">Close Below</span>
+              <span id="alert-below-price" class="alert-price"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 <script>
 (function () {
   const API = ''; // same origin
@@ -354,6 +503,15 @@
   }
 
   // ==== BUTTERY SMOOTH POINTER EVENT SYSTEM ====
+  let pointerDownState = {
+    startX: 0,
+    startY: 0,
+    startTime: 0,
+    isDragging: false,
+    hasMoved: false,
+    pendingDrag: null
+  };
+
   function onPointerDown(e) {
     const chartContainer = document.getElementById('chart');
     chartContainer.setPointerCapture(e.pointerId);
@@ -362,8 +520,18 @@
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
     
-    // Start performance freezing during drag
-    freezeDuringDrag(true);
+    // Record initial position and time for click vs drag detection
+    pointerDownState = {
+      startX: px,
+      startY: py,
+      startTime: Date.now(),
+      isDragging: false,
+      hasMoved: false,
+      pendingDrag: null
+    };
+    
+    // DON'T freeze performance yet - wait for drag threshold
+    // freezeDuringDrag(true); // MOVED TO DRAG THRESHOLD
     
     // Use screen-space hit testing for reliable selection
     const trendlineHit = hitTestTrendlines(px, py);
@@ -384,36 +552,34 @@
         const startDist = Math.hypot(px - x1, py - y1);
         const endDist = Math.hypot(px - x2, py - y2);
         
+        // DON'T set isDragging=true yet - store pending drag info
         if (startDist <= 12) {
-          // Start endpoint resize
-          trendDragState = {
-            isDragging: true, id: trendlineHit.id, mode: 'start',
+          pointerDownState.pendingDrag = {
+            type: 'trendline', id: trendlineHit.id, mode: 'start',
             base: { time, price }, start: { time: t.startTime, price: t.startPrice },
             end: { time: t.endTime, price: t.endPrice }
           };
         } else if (endDist <= 12) {
-          // End endpoint resize
-          trendDragState = {
-            isDragging: true, id: trendlineHit.id, mode: 'end',
+          pointerDownState.pendingDrag = {
+            type: 'trendline', id: trendlineHit.id, mode: 'end',
             base: { time, price }, start: { time: t.startTime, price: t.startPrice },
             end: { time: t.endTime, price: t.endPrice }
           };
         } else {
-          // Whole trendline move
-          trendDragState = {
-            isDragging: true, id: trendlineHit.id, mode: 'move',
+          pointerDownState.pendingDrag = {
+            type: 'trendline', id: trendlineHit.id, mode: 'move',
             base: { time, price }, start: { time: t.startTime, price: t.startPrice },
             end: { time: t.endTime, price: t.endPrice }
           };
         }
         
-        chartContainer.style.cursor = trendDragState.mode === 'move' ? 'grab' : 'nw-resize';
+        chartContainer.style.cursor = pointerDownState.pendingDrag.mode === 'move' ? 'grab' : 'nw-resize';
         e.preventDefault();
         e.stopPropagation();
       }
     } else if (levelHit) {
-      // Level drag
-      levelDragState = { isDragging: true, id: levelHit.id };
+      // Store pending level drag (don't set isDragging yet)
+      pointerDownState.pendingDrag = { type: 'level', id: levelHit.id };
       chartContainer.style.cursor = 'ns-resize';
       e.preventDefault();
       e.stopPropagation();
@@ -422,6 +588,44 @@
 
   function onPointerMove(e) {
     lastPointer = e; // stash the latest event
+    
+    // Track movement for click vs drag detection
+    if (pointerDownState && !pointerDownState.isDragging && pointerDownState.pendingDrag) {
+      const rect = document.getElementById('chart').getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      
+      const deltaX = Math.abs(px - pointerDownState.startX);
+      const deltaY = Math.abs(py - pointerDownState.startY);
+      const totalMovement = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+      
+      // If movement exceeds threshold, activate drag mode
+      if (totalMovement > 5) {
+        pointerDownState.isDragging = true;
+        pointerDownState.hasMoved = true;
+        
+        // Activate the pending drag based on type
+        if (pointerDownState.pendingDrag.type === 'trendline') {
+          trendDragState = {
+            isDragging: true,
+            id: pointerDownState.pendingDrag.id,
+            mode: pointerDownState.pendingDrag.mode,
+            base: pointerDownState.pendingDrag.base,
+            start: pointerDownState.pendingDrag.start,
+            end: pointerDownState.pendingDrag.end
+          };
+        } else if (pointerDownState.pendingDrag.type === 'level') {
+          levelDragState = { 
+            isDragging: true, 
+            id: pointerDownState.pendingDrag.id 
+          };
+        }
+        
+        // NOW start performance freezing for drag
+        freezeDuringDrag(true);
+      }
+    }
+    
     if (rafToken) return; // already queued
     rafToken = requestAnimationFrame(processPointer);
   }
@@ -437,6 +641,9 @@
     // Convert once per frame
     const time = chart.timeScale().coordinateToTime(px);
     const price = candleSeries.coordinateToPrice(py);
+
+    // Only process drags if we've exceeded the threshold
+    if (!pointerDownState.isDragging) return;
 
     // 1) drag level
     if (levelDragState.isDragging && levelDragState.id && Number.isFinite(price) && price > 0) {
@@ -496,7 +703,73 @@
     // Stop performance freezing
     freezeDuringDrag(false);
     
-    // finalize: save to storage, rebuild handles once, clear drag states
+    const rect = chartContainer.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    
+    // Check if this was a click vs drag
+    const duration = Date.now() - pointerDownState.startTime;
+    const deltaX = Math.abs(px - pointerDownState.startX);
+    const deltaY = Math.abs(py - pointerDownState.startY);
+    const totalMovement = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    
+    const wasClick = !pointerDownState.hasMoved && 
+                     totalMovement < 5 && 
+                     duration < 300 && 
+                     !drawingMode;
+    
+    if (wasClick) {
+      // HANDLE CLICK - Check for alert setup
+      const time = chart.timeScale().coordinateToTime(px);
+      const price = candleSeries.coordinateToPrice(py);
+      
+      if (time && price) {
+        // Check for line clicks first
+        const trendlineHit = hitTestTrendlines(px, py);
+        const levelHit = hitTestLevel(px, py);
+        
+        if (trendlineHit) {
+          const t = trendSeriesById.get(trendlineHit.id)?.data;
+          if (t) {
+            // Calculate current price on trendline at click time
+            const trendPrice = calculateTrendlinePrice(t, time);
+            openAlertModal({
+              type: 'trendline',
+              id: trendlineHit.id,
+              price: trendPrice,
+              trendlineData: t
+            });
+            log(`Alert setup for trendline`);
+          }
+        } else if (levelHit) {
+          const level = levelLineById.get(levelHit.id)?.data;
+          if (level) {
+            openAlertModal({
+              type: 'level',
+              id: levelHit.id,
+              price: level.price,
+              trendlineData: null
+            });
+            log(`Alert setup for level at $${level.price.toFixed(2)}`);
+          }
+        } else {
+          // Check for indicator clicks
+          const indicatorClick = detectIndicatorClick(px, py);
+          if (indicatorClick) {
+            openAlertModal(indicatorClick);
+            log(`Alert setup for ${indicatorClick.type}`);
+          }
+        }
+      }
+      
+      // Reset pointer state after click
+      pointerDownState = { startX: 0, startY: 0, startTime: 0, isDragging: false, hasMoved: false, pendingDrag: null };
+      lastPointer = null;
+      chartContainer.style.cursor = '';
+      return;
+    }
+    
+    // HANDLE DRAG END - finalize: save to storage, rebuild handles once, clear drag states
     if (levelDragState.isDragging) {
       levelDragState = { isDragging: false, id: null };
       saveLevelsForSymbol(currentSymbol, currentTimeframe, getLevelsForSymbol(currentSymbol, currentTimeframe));
@@ -510,6 +783,9 @@
       evaluateCurrentSignals(); // Update signals after trendline drag
     }
     
+    // Reset ALL pointer state
+    pointerDownState = { startX: 0, startY: 0, startTime: 0, isDragging: false, hasMoved: false, pendingDrag: null };
+    lastPointer = null;
     chartContainer.style.cursor = '';
   }
 
@@ -1507,20 +1783,28 @@
         const time = chart.timeScale().coordinateToTime(param.point.x);
         
         if (price !== null && !isNaN(price) && time !== null && time !== undefined) {
-          // Check if clicking on existing line for selection (when not in drawing mode)
+          // Check if clicking on existing line for alert setup (when not in drawing mode)
           if (!drawingMode) {
             const clickedLine = findLineNearClick(param.point.x, param.point.y);
             if (clickedLine) {
-              selectLine(clickedLine);
-              log(`Selected ${clickedLine.type} line`);
-              
-              // For level lines, also initiate dragging capability
-              if (clickedLine.type === 'level') {
-                levelDragState.draggedLevel = clickedLine;
-                levelDragState.startY = param.point.y;
-              }
+              // Show alert modal instead of just selecting
+              openAlertModal({
+                type: clickedLine.type,
+                id: clickedLine.data.id,
+                price: clickedLine.data.price,
+                trendlineData: clickedLine.data
+              });
+              log(`Alert setup for ${clickedLine.type} line`);
               return;
             } else {
+              // Check if clicking on indicators (EMA or Bollinger Bands)
+              const indicatorClick = detectIndicatorClick(param.point.x, param.point.y);
+              if (indicatorClick) {
+                openAlertModal(indicatorClick);
+                log(`Alert setup for ${indicatorClick.type}`);
+                return;
+              }
+              
               // Clicked on empty space - deselect current line
               if (selectedLine) {
                 deselectLine();
@@ -1628,6 +1912,85 @@
     }
     
     return null;
+  }
+
+  // Detect clicks on indicators (EMA, Bollinger Bands)
+  function detectIndicatorClick(clickX, clickY, tolerance = 8) {
+    if (!tfBars || tfBars.length === 0) return null;
+    
+    const clickTime = chart.timeScale().coordinateToTime(clickX);
+    const clickPrice = candleSeries.coordinateToPrice(clickY);
+    if (!clickTime || !clickPrice) return null;
+    
+    // Find the closest bar to the click
+    const closestBarIndex = findClosestBarIndex(tfBars, clickTime);
+    if (closestBarIndex === -1) return null;
+    
+    // Check if indicators are enabled and have data
+    if (indicators.ema200) {
+      const emaData = emaFromBars(tfBars, 200);
+      if (emaData && emaData[closestBarIndex]) {
+        const emaValue = emaData[closestBarIndex].value;
+        const emaY = candleSeries.priceToCoordinate(emaValue);
+        if (emaY !== null && Math.abs(clickY - emaY) <= tolerance) {
+          return {
+            type: 'ema',
+            id: 'ema200',
+            price: emaValue,
+            currentValue: emaValue
+          };
+        }
+      }
+    }
+    
+    if (indicators.bb20) {
+      const bbData = bbFromBars(tfBars, 20, 2);
+      if (bbData && bbData.upper[closestBarIndex]) {
+        const upperValue = bbData.upper[closestBarIndex].value;
+        const lowerValue = bbData.lower[closestBarIndex].value;
+        
+        const upperY = candleSeries.priceToCoordinate(upperValue);
+        const lowerY = candleSeries.priceToCoordinate(lowerValue);
+        
+        if (upperY !== null && Math.abs(clickY - upperY) <= tolerance) {
+          return {
+            type: 'bb_upper',
+            id: 'bb_upper',
+            price: upperValue,
+            currentValue: upperValue
+          };
+        }
+        
+        if (lowerY !== null && Math.abs(clickY - lowerY) <= tolerance) {
+          return {
+            type: 'bb_lower',
+            id: 'bb_lower',
+            price: lowerValue,
+            currentValue: lowerValue
+          };
+        }
+      }
+    }
+    
+    return null;
+  }
+  
+  // Helper function to find closest bar index for a given time
+  function findClosestBarIndex(bars, targetTime) {
+    if (!bars || bars.length === 0) return -1;
+    
+    let closest = 0;
+    let minDiff = Math.abs(bars[0].time - targetTime);
+    
+    for (let i = 1; i < bars.length; i++) {
+      const diff = Math.abs(bars[i].time - targetTime);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = i;
+      }
+    }
+    
+    return closest;
   }
 
   // Line detection for selection with multi-line conflict resolution
@@ -2730,6 +3093,128 @@
   };
 
   // removeSymbol no longer needs to be global (using event delegation)
+
+  // ================================================
+  // ALERT MODAL SYSTEM
+  // ================================================
+  
+  let currentAlertLine = null; // Store the line/indicator being configured
+  
+  // Open alert modal for a clicked line or indicator
+  function openAlertModal(lineInfo) {
+    currentAlertLine = lineInfo;
+    const modal = document.getElementById('alert-modal');
+    const title = document.getElementById('alert-modal-title');
+    const info = document.getElementById('alert-line-info');
+    const abovePrice = document.getElementById('alert-above-price');
+    const belowPrice = document.getElementById('alert-below-price');
+    
+    // Set modal title based on line type
+    if (lineInfo.type === 'level') {
+      title.textContent = `Alert for Level Line`;
+      info.textContent = `Symbol: ${currentSymbol} | Level: $${lineInfo.price.toFixed(2)}`;
+      abovePrice.textContent = `$${lineInfo.price.toFixed(2)}`;
+      belowPrice.textContent = `$${lineInfo.price.toFixed(2)}`;
+    } else if (lineInfo.type === 'trendline') {
+      title.textContent = `Alert for Trendline`;
+      info.textContent = `Symbol: ${currentSymbol} | Dynamic trendline price`;
+      abovePrice.textContent = 'trend line';
+      belowPrice.textContent = 'trend line';
+    } else if (lineInfo.type === 'ema') {
+      title.textContent = `Alert for EMA(200)`;
+      info.textContent = `Symbol: ${currentSymbol} | EMA(200) current value`;
+      abovePrice.textContent = 'EMA(200)';
+      belowPrice.textContent = 'EMA(200)';
+    } else if (lineInfo.type === 'bb_upper') {
+      title.textContent = `Alert for Bollinger Band Upper`;
+      info.textContent = `Symbol: ${currentSymbol} | Upper Bollinger Band`;
+      abovePrice.textContent = 'upper band';
+      belowPrice.textContent = 'upper band';
+    } else if (lineInfo.type === 'bb_lower') {
+      title.textContent = `Alert for Bollinger Band Lower`;
+      info.textContent = `Symbol: ${currentSymbol} | Lower Bollinger Band`;
+      abovePrice.textContent = 'lower band';
+      belowPrice.textContent = 'lower band';
+    }
+    
+    modal.style.display = 'flex';
+  }
+  
+  // Close alert modal
+  window.closeAlertModal = function() {
+    document.getElementById('alert-modal').style.display = 'none';
+    currentAlertLine = null;
+  }
+  
+  // Set alert direction (above/below)
+  window.setAlertDirection = function(direction) {
+    if (!currentAlertLine) return;
+    
+    const alertConfig = {
+      symbol: currentSymbol,
+      timeframe: currentTimeframe,
+      lineType: currentAlertLine.type,
+      lineId: currentAlertLine.id || null,
+      direction: direction, // 'above' or 'below'
+      price: currentAlertLine.price || null,
+      trendlineData: currentAlertLine.trendlineData || null,
+      created: Date.now()
+    };
+    
+    // Store alert configuration (not triggering yet)
+    storeAlertConfig(alertConfig);
+    
+    log(`Alert set: ${currentSymbol} close ${direction} ${currentAlertLine.type === 'level' ? '$' + currentAlertLine.price.toFixed(2) : currentAlertLine.type}`);
+    closeAlertModal();
+  }
+  
+  // Store alert configuration in localStorage 
+  function storeAlertConfig(config) {
+    const alertsKey = 'eod-alert-configs';
+    const existingAlerts = JSON.parse(localStorage.getItem(alertsKey) || '[]');
+    
+    // Remove any existing alert for same line/indicator
+    const filteredAlerts = existingAlerts.filter(alert => 
+      !(alert.symbol === config.symbol && 
+        alert.timeframe === config.timeframe &&
+        alert.lineType === config.lineType &&
+        alert.lineId === config.lineId)
+    );
+    
+    filteredAlerts.push(config);
+    localStorage.setItem(alertsKey, JSON.stringify(filteredAlerts));
+    
+    // Show confirmation
+    updateAlertsDisplay();
+  }
+  
+  // Show stored alerts (for debugging - will enhance later)
+  function updateAlertsDisplay() {
+    const alertsKey = 'eod-alert-configs';
+    const alerts = JSON.parse(localStorage.getItem(alertsKey) || '[]');
+    console.log('[ALERTS] Stored configurations:', alerts);
+  }
+  
+  // Helper function to calculate price on trendline at specific time
+  function calculateTrendlinePrice(trendlineData, time) {
+    if (!trendlineData || !time) return 0;
+    
+    const timeDelta = trendlineData.endTime - trendlineData.startTime;
+    const priceDelta = trendlineData.endPrice - trendlineData.startPrice;
+    
+    if (timeDelta === 0) return trendlineData.startPrice;
+    
+    const timeRatio = (time - trendlineData.startTime) / timeDelta;
+    return trendlineData.startPrice + (priceDelta * timeRatio);
+  }
+
+  // Close modal on outside click
+  document.getElementById('alert-modal').addEventListener('click', function(e) {
+    if (e.target === this) {
+      closeAlertModal();
+    }
+  });
+
 })();
 </script>
 </body>
