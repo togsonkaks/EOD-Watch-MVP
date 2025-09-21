@@ -1261,52 +1261,101 @@
     
     // Add mousedown event for level and trendline dragging
     chartContainer.addEventListener('mousedown', (event) => {
-      if (!drawingMode && selectedLine) {
-        const rect = chartContainer.getBoundingClientRect();
-        const clickX = event.clientX - rect.left;
-        const clickY = event.clientY - rect.top;
+      // Early exit if in drawing mode or no line selected
+      if (drawingMode || !selectedLine) return;
+      
+      const rect = chartContainer.getBoundingClientRect();
+      const clickX = event.clientX - rect.left;
+      const clickY = event.clientY - rect.top;
+      
+      // PRIORITY 1: Check endpoint hits first (highest priority)
+      const endpointHit = selectedLine.type === 'trendline' ? checkEndpointHit(clickX, clickY, selectedLine.data) : null;
+      
+      if (endpointHit) {
+        // Endpoint resizing - HIGHEST PRIORITY
+        endpointDragState.isDragging = true;
+        endpointDragState.draggedTrendline = selectedLine.data;
+        endpointDragState.endpoint = endpointHit; // 'start' or 'end'
+        chartContainer.style.cursor = 'nw-resize';
         
-        // Check if clicking on the selected line or its endpoints
-        const clickedLine = findLineNearClick(clickX, clickY);
-        const endpointHit = selectedLine.type === 'trendline' ? checkEndpointHit(clickX, clickY, selectedLine.data) : null;
+        // CRITICAL: Disable chart interactions during drag
+        chart.applyOptions({ 
+          handleScroll: false, 
+          handleScale: false,
+          kineticScroll: { touch: false, mouse: false }
+        });
         
-        if (endpointHit) {
-          // Endpoint resizing for trendlines
-          endpointDragState.isDragging = true;
-          endpointDragState.draggedTrendline = selectedLine.data;
-          endpointDragState.endpoint = endpointHit; // 'start' or 'end'
-          chartContainer.style.cursor = 'nw-resize';
+        // Stop all event propagation immediately
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        
+        log(`🎯 Endpoint ${endpointHit} drag started - chart interactions disabled`);
+        return; // Exit early - no other handlers should run
+      }
+      
+      // PRIORITY 2: Check line hits (medium priority)  
+      const clickedLine = findLineNearClick(clickX, clickY);
+      
+      if (clickedLine && clickedLine.data.id === selectedLine.data.id) {
+        if (selectedLine.type === 'level') {
+          // Level dragging
+          levelDragState.isDragging = true;
+          levelDragState.draggedLevel = clickedLine;
+          levelDragState.startY = clickY;
+          chartContainer.style.cursor = 'ns-resize';
+          
+          // Disable chart interactions during drag
+          chart.applyOptions({ 
+            handleScroll: false, 
+            handleScale: false,
+            kineticScroll: { touch: false, mouse: false }
+          });
+          
           event.preventDefault();
           event.stopPropagation();
-        } else if (clickedLine && clickedLine.data.id === selectedLine.data.id) {
-          if (selectedLine.type === 'level') {
-            levelDragState.isDragging = true;
-            levelDragState.draggedLevel = clickedLine;
-            levelDragState.startY = clickY;
-            chartContainer.style.cursor = 'ns-resize';
-          } else if (selectedLine.type === 'trendline') {
-            // Initialize trendline dragging
-            const currentTime = chart.timeScale().coordinateToTime(clickX);
-            const currentPrice = candleSeries.coordinateToPrice(clickY);
+          event.stopImmediatePropagation();
+          
+          log(`📏 Level drag started - chart interactions disabled`);
+          return;
+          
+        } else if (selectedLine.type === 'trendline') {
+          // Whole trendline dragging
+          const currentTime = chart.timeScale().coordinateToTime(clickX);
+          const currentPrice = candleSeries.coordinateToPrice(clickY);
+          
+          if (currentTime !== null && currentPrice !== null) {
+            trendlineDragState.isDragging = true;
+            trendlineDragState.draggedTrendline = {
+              data: clickedLine.data,
+              originalStart: { time: clickedLine.data.startTime, price: clickedLine.data.startPrice },
+              originalEnd: { time: clickedLine.data.endTime, price: clickedLine.data.endPrice }
+            };
+            trendlineDragState.startX = clickX;
+            trendlineDragState.startY = clickY;
+            trendlineDragState.offsetTime = currentTime;
+            trendlineDragState.offsetPrice = currentPrice;
+            chartContainer.style.cursor = 'move';
             
-            if (currentTime !== null && currentPrice !== null) {
-              trendlineDragState.isDragging = true;
-              trendlineDragState.draggedTrendline = {
-                data: clickedLine.data,
-                originalStart: { time: clickedLine.data.startTime, price: clickedLine.data.startPrice },
-                originalEnd: { time: clickedLine.data.endTime, price: clickedLine.data.endPrice }
-              };
-              trendlineDragState.startX = clickX;
-              trendlineDragState.startY = clickY;
-              trendlineDragState.offsetTime = currentTime;
-              trendlineDragState.offsetPrice = currentPrice;
-              chartContainer.style.cursor = 'move';
-            }
+            // Disable chart interactions during drag
+            chart.applyOptions({ 
+              handleScroll: false, 
+              handleScale: false,
+              kineticScroll: { touch: false, mouse: false }
+            });
+            
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+            
+            log(`📐 Whole trendline drag started - chart interactions disabled`);
+            return;
           }
-          event.preventDefault();
-          event.stopPropagation(); // Prevent chart panning during line drag
         }
       }
+      
+      // PRIORITY 3: Allow chart operations (lowest priority) - no blocks needed
+      // If we reach here, no line interaction was detected, so chart can handle normally
     });
     
     // Add mouseup event for level and trendline dragging
@@ -1326,7 +1375,15 @@
         levelDragState.draggedLevel = null;
         levelDragState.startY = null;
         chartContainer.style.cursor = '';
-        log(`✅ Level moved to ${newPrice.toFixed(2)} - new position saved`);
+        
+        // Re-enable chart interactions
+        chart.applyOptions({ 
+          handleScroll: true, 
+          handleScale: true,
+          kineticScroll: { touch: true, mouse: true }
+        });
+        
+        log(`✅ Level moved to ${newPrice.toFixed(2)} - chart interactions restored`);
       }
       
       if (trendlineDragState.isDragging) {
@@ -1350,7 +1407,15 @@
         trendlineDragState.offsetTime = null;
         trendlineDragState.offsetPrice = null;
         chartContainer.style.cursor = '';
-        log(`✅ Trendline resized - new position saved`);
+        
+        // Re-enable chart interactions
+        chart.applyOptions({ 
+          handleScroll: true, 
+          handleScale: true,
+          kineticScroll: { touch: true, mouse: true }
+        });
+        
+        log(`✅ Trendline moved - chart interactions restored`);
       }
       
       if (endpointDragState.isDragging) {
@@ -1370,21 +1435,35 @@
         endpointDragState.draggedTrendline = null;
         endpointDragState.endpoint = null;
         chartContainer.style.cursor = '';
+        
+        // Re-enable chart interactions
+        chart.applyOptions({ 
+          handleScroll: true, 
+          handleScale: true,
+          kineticScroll: { touch: true, mouse: true }
+        });
       }
     });
   }
 
   // Check if click is near a trendline endpoint for resizing
   function checkEndpointHit(clickX, clickY, trendlineData, tolerance = 12) {
-    if (!trendlineData) return null;
+    if (!trendlineData || !trendlineData.startTime || !trendlineData.endTime) return null;
     
-    // Get coordinates of start and end points
-    const startX = chart.timeScale().timeToCoordinate(trendlineData.startTime);
-    const startY = candleSeries.priceToCoordinate(trendlineData.startPrice);
-    const endX = chart.timeScale().timeToCoordinate(trendlineData.endTime);
-    const endY = candleSeries.priceToCoordinate(trendlineData.endPrice);
-    
-    if (startX !== null && startY !== null && endX !== null && endY !== null) {
+    try {
+      // Get coordinates of start and end points with null safety
+      const startX = chart.timeScale().timeToCoordinate(trendlineData.startTime);
+      const startY = candleSeries.priceToCoordinate(trendlineData.startPrice);
+      const endX = chart.timeScale().timeToCoordinate(trendlineData.endTime);
+      const endY = candleSeries.priceToCoordinate(trendlineData.endPrice);
+      
+      // Strict null checking - if ANY coordinate is null, abort
+      if (startX === null || startY === null || endX === null || endY === null ||
+          !Number.isFinite(startX) || !Number.isFinite(startY) || 
+          !Number.isFinite(endX) || !Number.isFinite(endY)) {
+        return null;
+      }
+      
       // Check distance to start point
       const startDistance = Math.sqrt(Math.pow(clickX - startX, 2) + Math.pow(clickY - startY, 2));
       if (startDistance <= tolerance) {
@@ -1396,49 +1475,117 @@
       if (endDistance <= tolerance) {
         return 'end';
       }
+    } catch (error) {
+      console.warn('[EOD] Coordinate conversion error in checkEndpointHit:', error);
+      return null;
     }
     
     return null;
   }
 
-  // Line detection for selection (approximate hit testing)
+  // Line detection for selection with multi-line conflict resolution
   function findLineNearClick(clickX, clickY, tolerance = 8) {
-    // Check horizontal levels first (easier calculation)
-    // For levels, make the entire horizontal line clickable across the chart width
-    for (let level of currentLevels) {
-      if (level._levelData) {
-        // Get Y coordinate of the level line
-        const levelY = candleSeries.priceToCoordinate(level._levelData.price);
-        if (levelY !== null && Math.abs(clickY - levelY) <= tolerance) {
-          // For horizontal level lines, we accept clicks anywhere along the horizontal line
-          // across the entire chart width, so no need to check X coordinate
-          return { type: 'level', data: level._levelData, series: level };
-        }
-      }
-    }
+    const candidates = [];
     
-    // Check trendlines (more complex calculation)
-    for (let trendline of currentTrendlines) {
-      if (trendline._trendlineData) {
-        const data = trendline._trendlineData;
-        
-        // Get coordinates of start and end points
-        const startX = chart.timeScale().timeToCoordinate(data.startTime);
-        const startY = candleSeries.priceToCoordinate(data.startPrice);
-        const endX = chart.timeScale().timeToCoordinate(data.endTime);
-        const endY = candleSeries.priceToCoordinate(data.endPrice);
-        
-        if (startX !== null && startY !== null && endX !== null && endY !== null) {
-          // Calculate distance from click point to line segment
-          const distance = pointToLineDistance(clickX, clickY, startX, startY, endX, endY);
-          if (distance <= tolerance) {
-            return { type: 'trendline', data: data, series: trendline };
+    // PRIORITY 1: Check if currently selected line is still being hit (sticky selection)
+    if (selectedLine) {
+      if (selectedLine.type === 'level') {
+        for (let level of currentLevels) {
+          if (level._levelData && level._levelData.id === selectedLine.data.id) {
+            const levelY = candleSeries.priceToCoordinate(level._levelData.price);
+            if (levelY !== null && Math.abs(clickY - levelY) <= tolerance) {
+              return { type: 'level', data: level._levelData, series: level, distance: Math.abs(clickY - levelY) };
+            }
+          }
+        }
+      } else if (selectedLine.type === 'trendline') {
+        for (let trendline of currentTrendlines) {
+          if (trendline._trendlineData && trendline._trendlineData.id === selectedLine.data.id) {
+            const data = trendline._trendlineData;
+            try {
+              const startX = chart.timeScale().timeToCoordinate(data.startTime);
+              const startY = candleSeries.priceToCoordinate(data.startPrice);
+              const endX = chart.timeScale().timeToCoordinate(data.endTime);
+              const endY = candleSeries.priceToCoordinate(data.endPrice);
+              
+              if (startX !== null && startY !== null && endX !== null && endY !== null &&
+                  Number.isFinite(startX) && Number.isFinite(startY) && 
+                  Number.isFinite(endX) && Number.isFinite(endY)) {
+                const distance = pointToLineDistance(clickX, clickY, startX, startY, endX, endY);
+                if (distance <= tolerance) {
+                  return { type: 'trendline', data: data, series: trendline, distance: distance };
+                }
+              }
+            } catch (error) {
+              console.warn('[EOD] Coordinate conversion error for selected line:', error);
+            }
           }
         }
       }
     }
     
-    return null;
+    // PRIORITY 2: Check all levels and collect candidates
+    for (let level of currentLevels) {
+      if (level._levelData) {
+        try {
+          const levelY = candleSeries.priceToCoordinate(level._levelData.price);
+          if (levelY !== null && Number.isFinite(levelY)) {
+            const distance = Math.abs(clickY - levelY);
+            if (distance <= tolerance) {
+              candidates.push({ 
+                type: 'level', 
+                data: level._levelData, 
+                series: level, 
+                distance: distance 
+              });
+            }
+          }
+        } catch (error) {
+          console.warn('[EOD] Coordinate conversion error for level:', error);
+        }
+      }
+    }
+    
+    // PRIORITY 3: Check all trendlines and collect candidates
+    for (let trendline of currentTrendlines) {
+      if (trendline._trendlineData) {
+        const data = trendline._trendlineData;
+        try {
+          const startX = chart.timeScale().timeToCoordinate(data.startTime);
+          const startY = candleSeries.priceToCoordinate(data.startPrice);
+          const endX = chart.timeScale().timeToCoordinate(data.endTime);
+          const endY = candleSeries.priceToCoordinate(data.endPrice);
+          
+          if (startX !== null && startY !== null && endX !== null && endY !== null &&
+              Number.isFinite(startX) && Number.isFinite(startY) && 
+              Number.isFinite(endX) && Number.isFinite(endY)) {
+            const distance = pointToLineDistance(clickX, clickY, startX, startY, endX, endY);
+            if (distance <= tolerance) {
+              candidates.push({ 
+                type: 'trendline', 
+                data: data, 
+                series: trendline, 
+                distance: distance 
+              });
+            }
+          }
+        } catch (error) {
+          console.warn('[EOD] Coordinate conversion error for trendline:', error);
+        }
+      }
+    }
+    
+    // PRIORITY 4: Select best candidate by shortest distance
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0];
+    
+    // Multiple candidates - pick the closest one
+    const closest = candidates.reduce((best, current) => 
+      current.distance < best.distance ? current : best
+    );
+    
+    log(`🎯 Selected closest line from ${candidates.length} candidates (distance: ${closest.distance.toFixed(1)}px)`);
+    return closest;
   }
 
   // Calculate distance from a point to a line segment
