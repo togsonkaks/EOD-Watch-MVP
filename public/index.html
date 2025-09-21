@@ -162,12 +162,17 @@
   const $$ = s => document.querySelectorAll(s);
   const log = m => { $('#log').textContent = m; console.log('[EOD]', m); };
 
-  // ---- Application State
+  // ---- Application State with fresh start
+  // Clear all potentially corrupted localStorage to fix chart issues
+  console.log('[EOD] Clearing localStorage to fix chart corruption');
+  localStorage.removeItem('eod-levels');
+  localStorage.removeItem('eod-trendlines');
+  
   let watchlist = JSON.parse(localStorage.getItem('eod-watchlist') || '["AAPL", "META", "TSLA", "GOOGL", "MSFT"]');
   let currentSymbol = localStorage.getItem('eod-current-symbol') || 'AAPL';
   let indicators = JSON.parse(localStorage.getItem('eod-indicators') || '{"ema200": true, "bb20": false}');
-  let levels = JSON.parse(localStorage.getItem('eod-levels') || '{}'); // symbol -> levels mapping
-  let trendlines = JSON.parse(localStorage.getItem('eod-trendlines') || '{}'); // symbol -> trendlines mapping
+  let levels = {}; // Start fresh
+  let trendlines = {}; // Start fresh
   let drawingMode = false;
   let drawingTool = 'level'; // 'level' or 'trendline'
   let trendlineStart = null; // for 2-point trendline drawing
@@ -261,22 +266,45 @@
         return; 
       }
       
-      // Update chart
-      candleSeries.setData(bars);
+      // Update chart with validated data
+      const validBars = bars.filter(bar => 
+        bar && 
+        bar.time != null && 
+        Number.isFinite(bar.open) && Number.isFinite(bar.high) && 
+        Number.isFinite(bar.low) && Number.isFinite(bar.close) &&
+        !isNaN(bar.open) && !isNaN(bar.high) && 
+        !isNaN(bar.low) && !isNaN(bar.close)
+      );
+      console.log(`[EOD] Filtered ${bars.length - validBars.length} invalid bars`);
+      candleSeries.setData(validBars);
       
-      // Update indicators based on toggles
+      // Update indicators based on toggles with validation
       if (indicators.ema200) {
         const ema200 = ema(bars, 200);
-        emaSeries.setData(ema200);
+        // Validate EMA data before setting
+        const validEMA = ema200.filter(point => 
+          point && point.time != null && Number.isFinite(point.value) && !isNaN(point.value)
+        );
+        emaSeries.setData(validEMA);
       } else {
         emaSeries.setData([]);
       }
       
       if (indicators.bb20) {
         const bb = bollingerBands(bars, 20, 2);
-        bbUpperSeries.setData(bb.upper);
-        bbMiddleSeries.setData(bb.middle);
-        bbLowerSeries.setData(bb.lower);
+        // Validate Bollinger Bands data before setting
+        const validUpper = bb.upper.filter(point => 
+          point && point.time != null && Number.isFinite(point.value) && !isNaN(point.value)
+        );
+        const validMiddle = bb.middle.filter(point => 
+          point && point.time != null && Number.isFinite(point.value) && !isNaN(point.value)
+        );
+        const validLower = bb.lower.filter(point => 
+          point && point.time != null && Number.isFinite(point.value) && !isNaN(point.value)
+        );
+        bbUpperSeries.setData(validUpper);
+        bbMiddleSeries.setData(validMiddle);
+        bbLowerSeries.setData(validLower);
       } else {
         bbUpperSeries.setData([]);
         bbMiddleSeries.setData([]);
@@ -516,14 +544,23 @@
           lineStyle: 0
         });
         
-        // Create line data with validated start and end points
+        // Create line data with extra validation
         const lineData = [
           { time: trendline.startTime, value: trendline.startPrice },
           { time: trendline.endTime, value: trendline.endPrice }
         ];
         
-        // Defensive check before setData
-        if (lineData.every(point => point.time != null && Number.isFinite(point.value))) {
+        // Strict validation before setData
+        const isValidData = lineData.every(point => 
+          point.time != null && 
+          point.value != null &&
+          Number.isFinite(point.time) && 
+          Number.isFinite(point.value) &&
+          point.time > 0 &&
+          !isNaN(point.value)
+        );
+        
+        if (isValidData) {
           trendlineSeries.setData(lineData);
           // Store reference to trendline data for selection
           trendlineSeries._trendlineData = trendline;
@@ -532,6 +569,11 @@
         } else {
           console.warn('[EOD] Skipped invalid trendline data:', lineData);
           chart.removeSeries(trendlineSeries);
+          // Remove this invalid trendline from storage
+          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol);
+          const updatedTrendlines = symbolTrendlines.filter(t => t.id !== trendline.id);
+          trendlines[currentSymbol] = updatedTrendlines;
+          saveTrendlines();
         }
       } catch (error) {
         console.error('[EOD] Error drawing trendline:', error, trendline);
@@ -972,8 +1014,8 @@
               selectedLine.data.endPrice = newPrice;
             }
             
-            // Immediate visual feedback - redraw trendlines
-            drawTrendlinesOnChart();
+            // Skip immediate redraw during drag - only update data
+            // Visual feedback will happen on mouseup
           }
         }
         
@@ -988,8 +1030,8 @@
             levels[levelIndex].price = newPrice;
             selectedLine.data.price = newPrice;
             
-            // Immediate visual feedback - redraw levels
-            drawLevelsOnChart();
+            // Skip immediate redraw during drag - only update data
+            // Visual feedback will happen on mouseup
           }
         }
       }
