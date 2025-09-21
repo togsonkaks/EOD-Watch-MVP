@@ -47,6 +47,27 @@
     .symbol-name { font-weight:500; }
     .remove-btn { background:var(--bad); font-size:12px; padding:2px 6px; border-radius:3px; border:none; color:white; }
 
+    /* Watchlist Board - Mini Chart Dashboard */
+    #watchlist-board-section { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px; }
+    #watchlist-board { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px; margin-top:10px; }
+    .mini-chart-container { 
+      background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px; 
+      cursor:pointer; transition:all 0.2s ease; position:relative; min-height:120px;
+    }
+    .mini-chart-container:hover { border-color:var(--accent); box-shadow:0 2px 8px rgba(59,130,246,0.2); }
+    .mini-chart-container.active { border-color:var(--accent); background:rgba(59,130,246,0.1); }
+    .mini-chart-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+    .mini-chart-symbol { font-weight:bold; font-size:12px; color:var(--text); }
+    .mini-chart-price { font-size:11px; color:var(--text-muted); }
+    .mini-chart-change { font-size:10px; font-weight:bold; }
+    .mini-chart-change.positive { color:#10b981; }
+    .mini-chart-change.negative { color:#ef4444; }
+    .mini-chart { width:100%; height:80px; }
+    .mini-chart-loading { 
+      display:flex; align-items:center; justify-content:center; height:80px; 
+      color:var(--text-muted); font-size:11px; 
+    }
+
     /* Enhanced Drawing Tools */
     .tool-section { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px; }
     .tool-btn { background:#374151; color:var(--text); border:0; border-radius:6px; padding:6px 12px; font-size:12px; cursor:pointer; margin-right:6px; margin-bottom:4px; }
@@ -139,6 +160,11 @@
           <button id="add-btn">+</button>
         </div>
         <div id="watchlist"></div>
+      </div>
+
+      <div id="watchlist-board-section">
+        <h3>MARKET BOARD</h3>
+        <div id="watchlist-board"></div>
       </div>
 
       <div class="tool-section">
@@ -515,6 +541,7 @@
       localStorage.setItem('eod-current-timeframe', timeframe);
       updateTimeframeDisplay();
       updateWatchlistDisplay();
+      updateMiniChartActiveState(); // Update active mini-chart highlighting
       updateLevelsDisplay();
       drawLevelsOnChart();
       updateTrendlinesDisplay();
@@ -584,6 +611,211 @@
       item.appendChild(nameSpan);
       item.appendChild(removeBtn);
       container.appendChild(item);
+    });
+    
+    // Update the watchlist board when watchlist changes
+    updateWatchlistBoard();
+  }
+
+  // Watchlist Board - Mini Chart Dashboard
+  let miniCharts = {}; // Store mini-chart instances
+
+  function updateWatchlistBoard() {
+    const container = $('#watchlist-board');
+    
+    // Dispose of existing mini-charts to prevent memory leaks
+    disposeMiniCharts();
+    
+    // Clear container
+    container.innerHTML = '';
+    
+    // Create mini-chart for each symbol in watchlist
+    watchlist.forEach(symbol => {
+      createMiniChart(symbol, container);
+    });
+    
+    // Load data for all mini-charts
+    watchlist.forEach(symbol => {
+      loadMiniChartData(symbol);
+    });
+  }
+
+  function createMiniChart(symbol, container) {
+    const miniContainer = document.createElement('div');
+    miniContainer.className = `mini-chart-container ${symbol === currentSymbol ? 'active' : ''}`;
+    miniContainer.dataset.symbol = symbol;
+    
+    // Header with symbol, price, and change
+    const header = document.createElement('div');
+    header.className = 'mini-chart-header';
+    header.innerHTML = `
+      <div class="mini-chart-symbol">${symbol}</div>
+      <div class="mini-chart-price" id="price-${symbol}">--</div>
+      <div class="mini-chart-change" id="change-${symbol}">--</div>
+    `;
+    
+    // Chart container
+    const chartDiv = document.createElement('div');
+    chartDiv.className = 'mini-chart';
+    chartDiv.id = `mini-chart-${symbol}`;
+    
+    // Loading indicator
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'mini-chart-loading';
+    loadingDiv.textContent = 'Loading...';
+    
+    miniContainer.appendChild(header);
+    miniContainer.appendChild(chartDiv);
+    miniContainer.appendChild(loadingDiv);
+    
+    // Click event to switch to this symbol for full analysis
+    miniContainer.addEventListener('click', () => {
+      loadSymbol(symbol, currentTimeframe);
+    });
+    
+    container.appendChild(miniContainer);
+    
+    // Create lightweight chart instance
+    try {
+      const miniChart = LightweightCharts.createChart(chartDiv, {
+        width: chartDiv.offsetWidth,
+        height: 80,
+        layout: {
+          background: { color: 'transparent' },
+          textColor: '#d1d5db',
+        },
+        grid: {
+          vertLines: { visible: false },
+          horzLines: { visible: false },
+        },
+        crosshair: { mode: 0 }, // Hidden
+        rightPriceScale: { visible: false },
+        leftPriceScale: { visible: false },
+        timeScale: { visible: false },
+        handleScroll: false,
+        handleScale: false,
+      });
+      
+      const candleSeries = miniChart.addCandlestickSeries({
+        upColor: '#10b981',
+        downColor: '#ef4444',
+        borderUpColor: '#10b981',
+        borderDownColor: '#ef4444',
+        wickUpColor: '#10b981',
+        wickDownColor: '#ef4444',
+      });
+      
+      miniCharts[symbol] = { 
+        chart: miniChart, 
+        candleSeries, 
+        container: miniContainer,
+        loadingDiv,
+        priceEl: header.querySelector('.mini-chart-price'),
+        changeEl: header.querySelector('.mini-chart-change')
+      };
+      
+      // Hide loading indicator once chart is created
+      loadingDiv.style.display = 'none';
+      
+    } catch (error) {
+      console.error(`Error creating mini-chart for ${symbol}:`, error);
+      loadingDiv.textContent = 'Error';
+    }
+  }
+
+  async function loadMiniChartData(symbol) {
+    try {
+      const miniChartData = miniCharts[symbol];
+      if (!miniChartData) return;
+      
+      const { loadingDiv, priceEl, changeEl, candleSeries } = miniChartData;
+      
+      loadingDiv.style.display = 'flex';
+      loadingDiv.textContent = 'Loading...';
+      
+      // Fetch limited data for mini-chart (last 60 bars for better performance)
+      const response = await fetch(`/api/data?symbol=${symbol}&timeframe=1D`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const rawData = await response.json();
+      if (!rawData || !Array.isArray(rawData) || rawData.length === 0) {
+        throw new Error('No data received');
+      }
+      
+      // Get recent data (last 60 bars for mini-chart - enough for context)
+      const recentData = rawData.slice(-60);
+      
+      // Process data for chart
+      const chartData = recentData.map(bar => ({
+        time: bar.date,
+        open: parseFloat(bar.open),
+        high: parseFloat(bar.high),
+        low: parseFloat(bar.low),
+        close: parseFloat(bar.close)
+      }));
+      
+      // Validate data
+      const validData = chartData.filter(bar => 
+        bar.open !== null && bar.high !== null && bar.low !== null && bar.close !== null &&
+        !isNaN(bar.open) && !isNaN(bar.high) && !isNaN(bar.low) && !isNaN(bar.close)
+      );
+      
+      if (validData.length === 0) {
+        throw new Error('No valid data after filtering');
+      }
+      
+      // Update mini-chart
+      candleSeries.setData(validData);
+      
+      // Update price and change info using stored element references
+      const latestBar = validData[validData.length - 1];
+      const previousBar = validData[validData.length - 2];
+      
+      if (latestBar && previousBar) {
+        const price = latestBar.close.toFixed(2);
+        const change = latestBar.close - previousBar.close;
+        const changePercent = ((change / previousBar.close) * 100).toFixed(2);
+        
+        priceEl.textContent = `$${price}`;
+        
+        const changeText = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent}%)`;
+        changeEl.textContent = changeText;
+        changeEl.className = `mini-chart-change ${change >= 0 ? 'positive' : 'negative'}`;
+      }
+      
+      // Hide loading indicator
+      loadingDiv.style.display = 'none';
+      
+    } catch (error) {
+      console.error(`Error loading data for ${symbol}:`, error);
+      const miniChartData = miniCharts[symbol];
+      if (miniChartData && miniChartData.loadingDiv) {
+        miniChartData.loadingDiv.textContent = 'Error';
+        miniChartData.loadingDiv.style.display = 'flex';
+      }
+    }
+  }
+
+  function disposeMiniCharts() {
+    Object.keys(miniCharts).forEach(symbol => {
+      if (miniCharts[symbol] && miniCharts[symbol].chart) {
+        miniCharts[symbol].chart.remove();
+      }
+    });
+    miniCharts = {};
+  }
+
+  function updateMiniChartActiveState() {
+    // Update active state for mini-charts when current symbol changes
+    Object.keys(miniCharts).forEach(symbol => {
+      const container = miniCharts[symbol].container;
+      if (container) {
+        if (symbol === currentSymbol) {
+          container.classList.add('active');
+        } else {
+          container.classList.remove('active');
+        }
+      }
     });
   }
 
