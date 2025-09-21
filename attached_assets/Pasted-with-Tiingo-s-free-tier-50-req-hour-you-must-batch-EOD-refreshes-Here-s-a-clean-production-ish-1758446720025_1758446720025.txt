@@ -1,0 +1,120 @@
+with Tiingo’s free tier (≈50 req/hour), you must batch EOD refreshes. Here’s a clean, production-ish pattern that stays inside limits and still lets you check alerts nightly.
+
+The game plan
+
+Only fetch 1×/day per symbol (delta since last bar).
+
+Resample locally for 4H/1D/1W/1M so you don’t create extra API traffic.
+
+Queue all symbols after the market close; process them at a fixed rate.
+
+Reserve headroom for ad-hoc user actions (e.g., 45/hr for batch, 5/hr spare).
+
+Scheduling + rate limit (Node)
+
+Use a queue + a limiter. I like bottleneck (tiny, reliable).
+// batcher.js
+import Bottleneck from 'bottleneck';
+import cron from 'node-cron';
+import { getDailyBarsCached } from './cache.js'; // your cache/delta function
+import fs from 'fs/promises';
+
+const SYMBOLS_FILE = './symbols.txt'; // one ticker per line (your watchlist)
+
+// 60/hr limit -> run batch at 50/hr, leave 10/hr for on-demand
+const limiter = new Bottleneck({
+  minTime: 60_000,               // ~1 per minute
+  reservoir: 50,                 // allow 50 per hour for batch
+  reservoirRefreshAmount: 50,
+  reservoirRefreshInterval: 60 * 60 * 1000
+});
+
+async function loadSymbols() {
+  const txt = await fs.readFile(SYMBOLS_FILE, 'utf8');
+  return txt.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+}
+
+async function refreshSymbol(symbol) {
+  // fetch only delta, update cache, then compute alerts
+  const out = await getDailyBarsCached(symbol, 1500, '1d'); // returns {symbol, data}
+  await computeAlerts(out.symbol, out.data);                // your alert logic
+  console.log(' updated', symbol);
+}
+
+export async function runBatchOnce() {
+  const syms = await loadSymbols();
+  for (const s of syms) {
+    limiter.schedule(() => refreshSymbol(s)).catch(e => {
+      console.error(' ', s, e.message);
+    });
+  }
+}
+
+// 5:10pm America/New_York, Mon–Fri
+cron.schedule('10 17 * * 1-5', runBatchOnce, { timezone: 'America/New_York' });
+
+// — Optional: priority lane for interactive requests —
+// call this from your API route when a user needs fresh data now:
+export function refreshNow(symbol) {
+  return limiter.schedule({ priority: 1 }, () => refreshSymbol(symbol));
+}
+
+// Dummy alert logic placeholder
+async function computeAlerts(symbol, bars) {
+  // evaluate crossings vs EMA/trend/levels and send email/Telegram
+}
+What this doesAfter the close, it enqueues all tickers and processes ~1 per minute (adjustable).It never refetches 5 years—only the daily delta—because getDailyBarsCached already handles that.You keep spare capacity for user-triggered refreshes.A few sharp tweaksKeep your watchlist in symbols.txt, or store it in a DB table with active=true.If you have 500 tickers, this cadence finishes overnight; you’ll wake up with everything fresh.If you later upgrade (Tiingo Power = 10k/hr), just bump reservoir/minTime and you’re done.Resampling locally (avoid extra API calls)Keep only daily from Tiingo. Generate 4H/1W/1M in-process:
+// resample.js
+export function toWeekly(dailyBars) {
+  const out = [];
+  let bucket = null;
+  for (const b of dailyBars) {
+    const d = new Date(b.time);
+    const isoWeek = `${d.getUTCFullYear()}-W${weekNo(d)}`; // implement weekNo
+    if (!bucket || bucket.key !== isoWeek) {
+      if (bucket) out.push(finalize(bucket));
+      bucket = { key: isoWeek, open: b.open, high: b.high, low: b.low, close: b.close, time: b.time };
+    } else {
+      bucket.high = Math.max(bucket.high, b.high);
+      bucket.low  = Math.min(bucket.low,  b.low);
+      bucket.close = b.close;
+      bucket.time  = b.time;
+    }
+  }
+  if (bucket) out.push(finalize(bucket));
+  return out;
+}
+function finalize(b) { return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }; }
+(For 4H, if you only have EOD, skip it in v1; or derive 4H from intraday later when you add an intraday source.)Alert logic (cross above/below)When you process a symbol:Compute EMA200 on the daily series (simple rolling EMA).Evaluate last closed bar vs EMA/levels/trendlines.Pseudocode:function crossesAbove(prevClose, close, level)   { return prevClose < level && close >= level; }
+function crossesBelow(prevClose, close, level)   { return prevClose > level && close <= level; }
+
+function lineYAt(line, x) {
+  // line = { x1, y1, x2, y2 }, x = bar index/time
+  const m = (line.y2 - line.y1) / (line.x2 - line.x1);
+  return line.y1 + m * (x - line.x1);
+}
+
+export function evaluateSignals(bars, ema200, levels=[], trends=[]) {
+  const n = bars.length;
+  const prev = bars[n-2].close, cur = bars[n-1].close;
+  const prevE = ema200[n-2],   curE = ema200[n-1];
+
+  const signals = [];
+  if (crossesAbove(prev, cur, curE)) signals.push('Close crossed ABOVE EMA200');
+  if (crossesBelow(prev, cur, curE)) signals.push('Close crossed BELOW EMA200');
+
+  for (const L of levels) {
+    if (crossesAbove(prev, cur, L.y)) signals.push(`Close crossed ABOVE level ${L.label ?? L.y}`);
+    if (crossesBelow(prev, cur, L.y)) signals.push(`Close crossed BELOW level ${L.label ?? L.y}`);
+  }
+  for (const T of trends) {
+    const yPrev = lineYAt(T, n-2);
+    const yCur  = lineYAt(T, n-1);
+    if (crossesAbove(prev, cur, yCur)) signals.push(`Close crossed ABOVE trend ${T.label ?? ''}`);
+    if (crossesBelow(prev, cur, yCur)) signals.push(`Close crossed BELOW trend ${T.label ?? ''}`);
+  }
+  return signals;
+}
+Store your levels/trendlines per symbol (DB table or JSON file). Feed them to evaluateSignals after each delta update; if you get any signals, fire Telegram/email.TL;DRBatch with a limiter (e.g., Bottleneck @ ~1 req/min).Cache everything; fetch delta only; resample locally.Cron kicks after close; queue drains overnight; alerts go out as each symbol updates.Interactive requests use a priority lane so the app feels snappy.
+
+

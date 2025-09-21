@@ -2,6 +2,7 @@ const path = require('path');
 const express = require('express');
 const fetch = require('node-fetch');   // v2 matches CommonJS
 const cors = require('cors');
+const { getDailyBarsCached } = require('./cache.js');
 require('dotenv').config();
 
 const app = express();
@@ -21,19 +22,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 // health
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 
-// Data cache for optimizing API usage (respects 500 req/day limit)
-const dataCache = new Map();
-const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes for EOD data
+// Production-grade delta caching now handled by cache.js
+// Eliminates rate limiting issues with intelligent delta updates
 
-function getCacheKey(symbol, timeframe, days) {
-  return `${symbol}-${timeframe}-${days}`;
-}
-
-function isCacheValid(timestamp) {
-  return Date.now() - timestamp < CACHE_DURATION;
-}
-
-// Enhanced data API with deep history and intraday framework
+// Enhanced data API with delta caching and deep history 
 app.get('/api/data', async (req, res) => {
   try {
     const symbol = (req.query.symbol || 'AAPL').toUpperCase();
@@ -43,65 +35,12 @@ app.get('/api/data', async (req, res) => {
     let days = parseInt(req.query.days || '4000', 10);
     days = Math.min(days, 4000); // Cap at 4000 days for performance
     
-    const cacheKey = getCacheKey(symbol, timeframe, days);
+    // Use production-grade delta caching
+    const result = await getDailyBarsCached(symbol, days, '1d');
     
-    // Check cache first
-    if (dataCache.has(cacheKey)) {
-      const cached = dataCache.get(cacheKey);
-      if (isCacheValid(cached.timestamp)) {
-        console.log(`📦 Cache hit for ${symbol} ${timeframe}`);
-        return res.json(cached.data);
-      }
-    }
-
-    console.log(`🔄 Fetching ${symbol} ${timeframe} (${days} days from Tiingo...`);
-    
-    // Calculate start date for deep history
-    const start = new Date(Date.now() - days * 86400000)
-      .toISOString()
-      .slice(0, 10);
-
-    let apiUrl;
-    
-    // Intraday framework (ready for future 4H, 1H, etc.)
-    switch (timeframe) {
-      case '4H':
-      case '1H':
-      case '15M':
-        // Future intraday support - for now fallback to daily
-        console.log(`⚠️ Intraday ${timeframe} not yet supported, using daily data`);
-        apiUrl = `https://api.tiingo.com/tiingo/daily/${encodeURIComponent(symbol)}/prices?startDate=${start}&token=${TIINGO_TOKEN}`;
-        break;
-      case '1W':
-      case '1M':
-      case '1D':
-      default:
-        // Daily data endpoint
-        apiUrl = `https://api.tiingo.com/tiingo/daily/${encodeURIComponent(symbol)}/prices?startDate=${start}&token=${TIINGO_TOKEN}`;
-        break;
-    }
-
-    const response = await fetch(apiUrl);
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ Tiingo API error ${response.status}: ${errorText}`);
-      return res.status(response.status).json({ 
-        error: 'api_error', 
-        status: response.status,
-        message: errorText 
-      });
-    }
-    
-    const rawData = await response.json();
-    
-    if (!Array.isArray(rawData) || rawData.length === 0) {
-      console.warn(`⚠️ No data received for ${symbol}`);
-      return res.json([]);
-    }
-
     // Transform to frontend format
-    const transformedData = rawData.map(bar => ({
-      date: bar.date,
+    const transformedData = result.data.map(bar => ({
+      date: bar.time,
       open: parseFloat(bar.open),
       high: parseFloat(bar.high), 
       low: parseFloat(bar.low),
@@ -109,13 +48,7 @@ app.get('/api/data', async (req, res) => {
       volume: bar.volume || 0
     }));
 
-    // Cache the result
-    dataCache.set(cacheKey, {
-      data: transformedData,
-      timestamp: Date.now()
-    });
-
-    console.log(`✅ Loaded ${transformedData.length} bars for ${symbol} ${timeframe}`);
+    console.log(`✅ Served ${transformedData.length} bars for ${symbol} ${timeframe}`);
     res.json(transformedData);
 
   } catch (err) {
@@ -128,29 +61,17 @@ app.get('/api/data', async (req, res) => {
   }
 });
 
-// Legacy EOD endpoint (maintained for backward compatibility)
+// Legacy EOD endpoint with delta caching (backward compatibility)
 app.get('/eod', async (req, res) => {
   try {
     const symbol = (req.query.symbol || 'AAPL').toUpperCase();
     const days = Math.min(parseInt(req.query.days || '600', 10), 2000);
 
-    const start = new Date(Date.now() - days * 86400000)
-      .toISOString()
-      .slice(0, 10);
-
-    const url =
-      `https://api.tiingo.com/tiingo/daily/${encodeURIComponent(symbol)}/prices` +
-      `?startDate=${start}&token=${TIINGO_TOKEN}`;
-
-    const r = await fetch(url);
-    if (!r.ok) {
-      const txt = await r.text();
-      return res.status(r.status).send(txt);
-    }
-    const json = await r.json();
-
-    const data = json.map(d => ({
-      time: Math.floor(new Date(d.date).getTime() / 1000),
+    // Use production-grade delta caching
+    const result = await getDailyBarsCached(symbol, days, '1d');
+    
+    const data = result.data.map(d => ({
+      time: Math.floor(new Date(d.time).getTime() / 1000),
       open: d.open,
       high: d.high,
       low: d.low,
