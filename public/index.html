@@ -263,7 +263,8 @@
   let selectedLine = null; // currently selected line for editing
   let lineHandles = []; // visual handles for selected line
   let isLineSelected = false; // flag to track selection state
-  // Trendline drag state for moving entire lines
+  // Drag states for line interaction
+  let levelDragState = { isDragging: false, draggedLevel: null, startY: null };
   let trendlineDragState = { isDragging: false, draggedTrendline: null, startX: null, startY: null, offsetTime: null, offsetPrice: null };
 
   // ---- Chart init
@@ -1076,7 +1077,6 @@
   }
 
   // ---- Chart Interaction
-  let levelDragState = { isDragging: false, draggedLevel: null, startY: null };
   
   function setupChartInteraction() {
     chart.subscribeClick(param => {
@@ -1260,6 +1260,7 @@
             }
           }
           event.preventDefault();
+          event.stopPropagation(); // Prevent chart panning during line drag
         }
       }
     });
@@ -1281,6 +1282,7 @@
         levelDragState.draggedLevel = null;
         levelDragState.startY = null;
         chartContainer.style.cursor = '';
+        log(`✅ Level moved to ${newPrice.toFixed(2)} - new position saved`);
       }
       
       if (trendlineDragState.isDragging) {
@@ -1304,6 +1306,7 @@
         trendlineDragState.offsetTime = null;
         trendlineDragState.offsetPrice = null;
         chartContainer.style.cursor = '';
+        log(`✅ Trendline resized - new position saved`);
       }
     });
   }
