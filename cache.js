@@ -136,7 +136,8 @@ async function getDailyBarsCached(symbol, days = 600, timeframe = '1d') {
     throw new Error(`Invalid symbol format: ${symbol}`);
   }
 
-  const today = getLastTradingDay();
+  // Use weekend-aware dates for daily data, current date for intraday
+  const today = (timeframe === '4h') ? ymd(new Date()) : getLastTradingDay();
   let { meta, bars } = await readCache(symbol, timeframe);
 
   // Check if we're in a rate limit window

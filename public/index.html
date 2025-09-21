@@ -1958,10 +1958,6 @@
   $$('.tf.btn-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
       const tf = btn.dataset.tf;
-      if (tf === '4H') {
-        log('4H timeframe requires intraday data (not available)');
-        return;
-      }
       
       if (tf !== currentTimeframe) {
         currentTimeframe = tf;
