@@ -257,11 +257,14 @@
   let drawingTool = 'level'; // 'level' or 'trendline'
   let trendlineStart = null; // for 2-point trendline drawing
   let previewTrendline = null; // preview line while drawing
+  let previewUpdateThrottle = null; // throttle preview updates for performance
   let currentLevels = []; // active level lines on chart
   let currentTrendlines = []; // active trendlines on chart
   let selectedLine = null; // currently selected line for editing
   let lineHandles = []; // visual handles for selected line
   let isLineSelected = false; // flag to track selection state
+  // Trendline drag state for moving entire lines
+  let trendlineDragState = { isDragging: false, draggedTrendline: null, startX: null, startY: null, offsetTime: null, offsetPrice: null };
 
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
@@ -1139,14 +1142,20 @@
     let chartContainer = document.getElementById('chart');
     chartContainer.addEventListener('mousemove', (event) => {
       if (drawingMode && drawingTool === 'trendline' && trendlineStart && previewTrendline) {
-        const rect = chartContainer.getBoundingClientRect();
-        const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-        const price = candleSeries.coordinateToPrice(point.y);
-        const time = chart.timeScale().coordinateToTime(point.x);
-        
-        if (price !== null && !isNaN(price) && time !== null && time !== undefined) {
-          updateTrendlinePreview(time, price);
+        // Throttle preview updates for better performance (max 60fps)
+        if (previewUpdateThrottle) {
+          clearTimeout(previewUpdateThrottle);
         }
+        previewUpdateThrottle = setTimeout(() => {
+          const rect = chartContainer.getBoundingClientRect();
+          const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+          const price = candleSeries.coordinateToPrice(point.y);
+          const time = chart.timeScale().coordinateToTime(point.x);
+          
+          if (price !== null && !isNaN(price) && time !== null && time !== undefined) {
+            updateTrendlinePreview(time, price);
+          }
+        }, 16); // ~60fps throttling
       }
       
       // Handle level line dragging when clicking anywhere on the horizontal line
@@ -1174,28 +1183,88 @@
           }
         }
       }
+      
+      // Handle trendline dragging for moving entire lines
+      if (trendlineDragState.isDragging && trendlineDragState.draggedTrendline) {
+        const rect = chartContainer.getBoundingClientRect();
+        const newX = event.clientX - rect.left;
+        const newY = event.clientY - rect.top;
+        const newTime = chart.timeScale().coordinateToTime(newX);
+        const newPrice = candleSeries.coordinateToPrice(newY);
+        
+        if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
+          // Calculate the offset from the original drag start position
+          const timeDelta = newTime - trendlineDragState.offsetTime;
+          const priceDelta = newPrice - trendlineDragState.offsetPrice;
+          
+          // Update trendline by applying the same offset to both points (preserves angle)
+          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+          const trendlineIndex = symbolTrendlines.findIndex(t => t.id === trendlineDragState.draggedTrendline.data.id);
+          if (trendlineIndex >= 0) {
+            const originalStart = trendlineDragState.draggedTrendline.originalStart;
+            const originalEnd = trendlineDragState.draggedTrendline.originalEnd;
+            
+            symbolTrendlines[trendlineIndex].startTime = originalStart.time + timeDelta;
+            symbolTrendlines[trendlineIndex].startPrice = originalStart.price + priceDelta;
+            symbolTrendlines[trendlineIndex].endTime = originalEnd.time + timeDelta;
+            symbolTrendlines[trendlineIndex].endPrice = originalEnd.price + priceDelta;
+            
+            // Update the draggedTrendline reference
+            trendlineDragState.draggedTrendline.data = symbolTrendlines[trendlineIndex];
+            
+            // Real-time visual update
+            try {
+              saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
+              drawTrendlinesOnChart();
+              updateLineHandles();
+            } catch (error) {
+              console.warn('[EOD] Error during trendline drag:', error);
+            }
+          }
+        }
+      }
     });
     
-    // Add mousedown event for level line dragging
+    // Add mousedown event for level and trendline dragging
     chartContainer.addEventListener('mousedown', (event) => {
-      if (!drawingMode && selectedLine && selectedLine.type === 'level') {
+      if (!drawingMode && selectedLine) {
         const rect = chartContainer.getBoundingClientRect();
         const clickX = event.clientX - rect.left;
         const clickY = event.clientY - rect.top;
         
-        // Check if clicking on the selected level line
+        // Check if clicking on the selected line
         const clickedLine = findLineNearClick(clickX, clickY);
         if (clickedLine && clickedLine.data.id === selectedLine.data.id) {
-          levelDragState.isDragging = true;
-          levelDragState.draggedLevel = clickedLine;
-          levelDragState.startY = clickY;
-          chartContainer.style.cursor = 'ns-resize';
+          if (selectedLine.type === 'level') {
+            levelDragState.isDragging = true;
+            levelDragState.draggedLevel = clickedLine;
+            levelDragState.startY = clickY;
+            chartContainer.style.cursor = 'ns-resize';
+          } else if (selectedLine.type === 'trendline') {
+            // Initialize trendline dragging
+            const currentTime = chart.timeScale().coordinateToTime(clickX);
+            const currentPrice = candleSeries.coordinateToPrice(clickY);
+            
+            if (currentTime !== null && currentPrice !== null) {
+              trendlineDragState.isDragging = true;
+              trendlineDragState.draggedTrendline = {
+                data: clickedLine.data,
+                originalStart: { time: clickedLine.data.startTime, price: clickedLine.data.startPrice },
+                originalEnd: { time: clickedLine.data.endTime, price: clickedLine.data.endPrice }
+              };
+              trendlineDragState.startX = clickX;
+              trendlineDragState.startY = clickY;
+              trendlineDragState.offsetTime = currentTime;
+              trendlineDragState.offsetPrice = currentPrice;
+              chartContainer.style.cursor = 'move';
+            }
+          }
           event.preventDefault();
         }
       }
     });
     
-    // Add mouseup event for level line dragging
+    // Add mouseup event for level and trendline dragging
     chartContainer.addEventListener('mouseup', (event) => {
       if (levelDragState.isDragging) {
         const rect = chartContainer.getBoundingClientRect();
@@ -1211,6 +1280,29 @@
         levelDragState.isDragging = false;
         levelDragState.draggedLevel = null;
         levelDragState.startY = null;
+        chartContainer.style.cursor = '';
+      }
+      
+      if (trendlineDragState.isDragging) {
+        const rect = chartContainer.getBoundingClientRect();
+        const newX = event.clientX - rect.left;
+        const newY = event.clientY - rect.top;
+        const newTime = chart.timeScale().coordinateToTime(newX);
+        const newPrice = candleSeries.coordinateToPrice(newY);
+        
+        if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
+          log(`✅ Trendline moved while preserving angle`);
+        } else {
+          log('⚠️ Drag position out of bounds - trendline not moved');
+        }
+        
+        // Reset trendline drag state
+        trendlineDragState.isDragging = false;
+        trendlineDragState.draggedTrendline = null;
+        trendlineDragState.startX = null;
+        trendlineDragState.startY = null;
+        trendlineDragState.offsetTime = null;
+        trendlineDragState.offsetPrice = null;
         chartContainer.style.cursor = '';
       }
     });
@@ -1421,6 +1513,24 @@
         chartContainer.appendChild(endHandle);
         lineHandles.push(endHandle);
       }
+      
+      // Middle handle for moving entire trendline
+      if (startX !== null && startY !== null && endX !== null && endY !== null) {
+        const middleX = (startX + endX) / 2;
+        const middleY = (startY + endY) / 2;
+        
+        const middleHandle = createHandle(middleX, middleY, 'move');
+        middleHandle.dataset.handleType = 'middle';
+        middleHandle.dataset.lineType = 'trendline';
+        middleHandle.style.backgroundColor = '#22d3ee'; // Different color for middle handle
+        middleHandle.style.border = '2px solid #0891b2';
+        middleHandle.style.width = '16px'; // Slightly larger for easier grabbing
+        middleHandle.style.height = '16px';
+        middleHandle.style.left = (middleX - 8) + 'px';
+        middleHandle.style.top = (middleY - 8) + 'px';
+        chartContainer.appendChild(middleHandle);
+        lineHandles.push(middleHandle);
+      }
     } else if (selectedLine.type === 'level') {
       // Add a single handle for horizontal level (vertical movement only)
       const data = selectedLine.data;
@@ -1489,6 +1599,21 @@
           lineHandles[1].style.top = (endY - 6) + 'px';
         }
       }
+      
+      // Update middle handle
+      if (lineHandles[2]) {
+        const startX = chart.timeScale().timeToCoordinate(data.startTime);
+        const startY = candleSeries.priceToCoordinate(data.startPrice);
+        const endX = chart.timeScale().timeToCoordinate(data.endTime);
+        const endY = candleSeries.priceToCoordinate(data.endPrice);
+        
+        if (startX !== null && startY !== null && endX !== null && endY !== null) {
+          const middleX = (startX + endX) / 2;
+          const middleY = (startY + endY) / 2;
+          lineHandles[2].style.left = (middleX - 8) + 'px'; // -8 because middle handle is 16px
+          lineHandles[2].style.top = (middleY - 8) + 'px';
+        }
+      }
     } else if (selectedLine.type === 'level') {
       // Update level handle position (keep in middle of visible range)
       if (lineHandles[0]) {
@@ -1511,7 +1636,7 @@
   }
 
   // Drag functionality for handles
-  let dragState = { isDragging: false, handleElement: null, isStart: false, lineType: null };
+  let dragState = { isDragging: false, handleElement: null, isStart: false, isMiddle: false, lineType: null, originalStart: null, originalEnd: null, startMouseTime: null, startMousePrice: null };
 
   document.addEventListener('mousedown', (event) => {
     const handle = event.target.closest('.line-handle');
@@ -1666,7 +1791,7 @@
     if (dragState.handleElement && dragState.handleElement.parentNode) {
       dragState.handleElement.style.cursor = dragState.lineType === 'level' ? 'ns-resize' : 'grab';
     }
-    dragState = { isDragging: false, handleElement: null, isStart: false, lineType: null };
+    dragState = { isDragging: false, handleElement: null, isStart: false, isMiddle: false, lineType: null, originalStart: null, originalEnd: null, startMouseTime: null, startMousePrice: null };
   });
   
   function clearLineHandles() { 
@@ -1679,7 +1804,7 @@
     lineHandles=[]; 
     
     // Completely reset drag state
-    dragState = { isDragging: false, handleElement: null, isStart: false, lineType: null };
+    dragState = { isDragging: false, handleElement: null, isStart: false, isMiddle: false, lineType: null, originalStart: null, originalEnd: null, startMouseTime: null, startMousePrice: null };
   }
   
   // Track chart viewport changes to keep handles synchronized
@@ -1868,6 +1993,12 @@
   }
 
   function disableTrendlinePreview() {
+    // Clear throttle timer to prevent memory leaks
+    if (previewUpdateThrottle) {
+      clearTimeout(previewUpdateThrottle);
+      previewUpdateThrottle = null;
+    }
+    
     if (previewTrendline) {
       chart.removeSeries(previewTrendline);
       previewTrendline = null;
