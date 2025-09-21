@@ -142,6 +142,14 @@
     <button id="toggleEMA" class="btn-toggle">EMA200</button>
     <button id="toggleBB" class="btn-toggle">BB(20,2)</button>
     <div class="toolbar-sep"></div>
+    <div id="testbox" style="display:flex; gap:6px; align-items:center;">
+      <span style="opacity:.7">Test Mode:</span>
+      <button id="testStart">Start</button>
+      <button id="testStep">Step</button>
+      <button id="testStop">Stop</button>
+      <button id="testReset">Reset</button>
+    </div>
+    <div class="toolbar-sep"></div>
     <div style="display:flex; align-items:center;">
       <div class="status-dot status-connected" id="status-dot"></div>
       <span id="topStatus" style="margin-left:6px;color:var(--muted)">Ready</span>
@@ -263,6 +271,9 @@
     localStorage.removeItem('eod-trendlines');
     localStorage.setItem('eod-migration-version', '2.0');
   }
+
+  // Global state for signal detection system
+  let tfBars = [];  // Current timeframe bars for signal evaluation
   
   let watchlist = JSON.parse(localStorage.getItem('eod-watchlist') || '["AAPL", "META", "TSLA", "GOOGL", "MSFT"]');
   let currentSymbol = localStorage.getItem('eod-current-symbol') || 'AAPL';
@@ -490,11 +501,13 @@
       levelDragState = { isDragging: false, id: null };
       saveLevelsForSymbol(currentSymbol, currentTimeframe, getLevelsForSymbol(currentSymbol, currentTimeframe));
       updateLineHandles();
+      evaluateCurrentSignals(); // Update signals after level drag
     }
     if (trendDragState.isDragging) {
       trendDragState.isDragging = false;
       saveTrendlinesForSymbol(currentSymbol, currentTimeframe, getTrendlinesForSymbol(currentSymbol, currentTimeframe));
       updateLineHandles();
+      evaluateCurrentSignals(); // Update signals after trendline drag
     }
     
     chartContainer.style.cursor = '';
@@ -787,6 +800,13 @@
       // Update status to connected
       $('#status-dot').className = 'status-dot status-connected';
       log(`Loaded ${sym}: ${bars.length} bars`);
+      
+      // Store tfBars for signal evaluation
+      tfBars = chartBars;
+      
+      // Evaluate signals for the loaded data
+      evaluateCurrentSignals();
+      
     } catch (e) {
       log('Load failed: ' + e.message);
       $('#status-dot').className = 'status-dot status-error';
@@ -1078,11 +1098,13 @@
   function saveLevels() {
     const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
     saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
+    evaluateCurrentSignals(); // Update signals when levels change
   }
 
   function saveTrendlines() {
     const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
     saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
+    evaluateCurrentSignals(); // Update signals when trendlines change
   }
 
   function addTrendline(startTime, startPrice, endTime, endPrice) {
@@ -1102,6 +1124,7 @@
     saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
     updateTrendlinesDisplay();
     drawTrendlinesOnChart();
+    evaluateCurrentSignals(); // Update signals when trendline added
     return trendline;
   }
 
@@ -1117,12 +1140,14 @@
     
     updateTrendlinesDisplay();
     drawTrendlinesOnChart();
+    evaluateCurrentSignals(); // Update signals when trendline removed
   }
 
   function clearAllTrendlines() {
     saveTrendlinesForSymbol(currentSymbol, currentTimeframe, []);
     updateTrendlinesDisplay();
     drawTrendlinesOnChart();
+    evaluateCurrentSignals(); // Update signals when all trendlines cleared
   }
 
   function addLevel(price) {
@@ -1139,6 +1164,7 @@
     saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
     updateLevelsDisplay();
     drawLevelsOnChart();
+    evaluateCurrentSignals(); // Update signals when level added
     return level;
   }
 
@@ -1198,6 +1224,7 @@
     saveLevelsForSymbol(currentSymbol, currentTimeframe, []);
     updateLevelsDisplay();
     drawLevelsOnChart();
+    evaluateCurrentSignals(); // Update signals when all levels cleared
   }
 
   function updateLevelsDisplay() {
@@ -2394,6 +2421,313 @@
       log('Backend connection failed');
       $('#status-dot').className = 'status-dot status-error';
     });
+
+  // ================================================
+  // SIGNAL DETECTION & CROSSING ANALYSIS SYSTEM
+  // ================================================
+  
+  // Core crossing detection function
+  function crossed(prevA, prevB, curA, curB) {
+    if ([prevA,prevB,curA,curB].some(v=>!Number.isFinite(v))) return false;
+    const d1 = prevA - prevB, d2 = curA - curB;
+    return (d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0);
+  }
+
+  // EMA calculation from bars
+  function emaFromBars(bars, period) {
+    if (!bars?.length) return [];
+    const k = 2 / (period + 1);
+    let e = bars[0].close;
+    const out = [{ time: bars[0].time, value: e }];
+    for (let i=1;i<bars.length;i++) {
+      e = bars[i].close*k + e*(1-k);
+      out.push({ time: bars[i].time, value: e });
+    }
+    return out;
+  }
+
+  // Bollinger Bands calculation from bars
+  function bbFromBars(bars, period=20, mult=2) {
+    const outU=[], outM=[], outL=[];
+    const closes = bars.map(b=>b.close);
+    const sma = (arr, n, i) => {
+      if (i < n-1) return null;
+      let s=0; for (let k=i-n+1;k<=i;k++) s+=arr[k];
+      return s/n;
+    };
+    for (let i=0;i<bars.length;i++){
+      const m = sma(closes, period, i);
+      if (m == null) { outU.push(null); outM.push(null); outL.push(null); continue; }
+      let v=0; for (let k=i-period+1;k<=i;k++) v += (closes[k]-m)*(closes[k]-m);
+      const sd = Math.sqrt(v/period);
+      outU.push({ time: bars[i].time, value: m + mult*sd });
+      outM.push({ time: bars[i].time, value: m });
+      outL.push({ time: bars[i].time, value: m - mult*sd });
+    }
+    return { upper: outU.filter(Boolean), middle: outM.filter(Boolean), lower: outL.filter(Boolean) };
+  }
+
+  // Calculate value on trendline at specific time
+  function valueOnTrendAt(tr, t) {
+    if (tr.endTime === tr.startTime) return tr.startPrice;
+    const m = (tr.endPrice - tr.startPrice) / (tr.endTime - tr.startTime);
+    return tr.startPrice + m * (t - tr.startTime);
+  }
+
+  // Main signal evaluation function
+  function evaluateCrossSuite(bars, levels=[], trends=[], opts={ useEMA200:true, useBB:true }) {
+    const N = bars.length;
+    if (N < 2) return { ema:null, bb:null, level:[], trend:[] };
+
+    const prev = bars[N-2].close;
+    const cur  = bars[N-1].close;
+    const tPrev= bars[N-2].time;
+    const tCur = bars[N-1].time;
+
+    const out = { ema:null, bb:null, level:[], trend:[] };
+
+    // EMA200 analysis
+    if (opts.useEMA200) {
+      const ema200 = emaFromBars(bars, 200);
+      const ePrev = ema200[ema200.length-2]?.value;
+      const eCur  = ema200[ema200.length-1]?.value;
+      if (Number.isFinite(ePrev) && Number.isFinite(eCur)) {
+        if (crossed(prev, ePrev, cur, eCur)) {
+          out.ema = (cur > eCur) ? 'ema_cross_up' : 'ema_cross_down';
+        } else {
+          out.ema = (cur >= eCur) ? 'ema_above' : 'ema_below';
+        }
+      }
+      out._emaValue = eCur; // optional for display
+    }
+
+    // Bollinger Bands (20,2) analysis
+    if (opts.useBB) {
+      const bb = bbFromBars(bars, 20, 2);
+      const uPrev = bb.upper.at(-2)?.value, uCur = bb.upper.at(-1)?.value;
+      const lPrev = bb.lower.at(-2)?.value, lCur = bb.lower.at(-1)?.value;
+
+      if (Number.isFinite(uPrev) && Number.isFinite(uCur)) {
+        if (crossed(prev, uPrev, cur, uCur)) out.bb = (cur > uCur) ? 'above_upper_cross' : 'below_upper_cross';
+        else if (cur > uCur) out.bb = 'above_upper';
+      }
+      if (Number.isFinite(lPrev) && Number.isFinite(lCur)) {
+        if (crossed(prev, lPrev, cur, lCur)) out.bb = (cur < lCur) ? 'below_lower_cross' : 'above_lower_cross';
+        else if (cur < lCur) out.bb = 'below_lower';
+      }
+      out._bbUpper = uCur; out._bbLower = lCur; // optional
+    }
+
+    // Level crossings analysis
+    for (const L of levels) {
+      const p = +L.price;
+      if (!Number.isFinite(p)) continue;
+      if (crossed(prev, p, cur, p)) {
+        out.level.push({ id:L.id, dir: cur > p ? 'cross_up' : 'cross_down', price:p, label:L.label||null });
+      } else {
+        out.level.push({ id:L.id, dir: cur > p ? 'above' : 'below', price:p, label:L.label||null });
+      }
+    }
+
+    // Trendline crossings analysis
+    for (const tr of trends) {
+      const yPrev = valueOnTrendAt(tr, tPrev);
+      const yCur  = valueOnTrendAt(tr, tCur);
+      if (!Number.isFinite(yPrev) || !Number.isFinite(yCur)) continue;
+      if (crossed(prev, yPrev, cur, yCur)) {
+        out.trend.push({ id: tr.id, dir: cur > yCur ? 'cross_up' : 'cross_down' });
+      } else {
+        out.trend.push({ id: tr.id, dir: cur > yCur ? 'above' : 'below' });
+      }
+    }
+
+    return out;
+  }
+
+  // ================================================
+  // TEST MODE INFRASTRUCTURE
+  // ================================================
+  
+  // Test Mode state
+  let TEST_TIMER = null;
+  let testBars = [];          // 1m bars we're generating
+  let baseFrom = null;        // start from last real close
+  let testSpeedMs = 250;      // 4 bars/sec; tweak to taste
+
+  function cloneBar(b){ return { time:b.time, open:b.open, high:b.high, low:b.low, close:b.close }; }
+
+  // Random-walk 1m bar around last close; "volBp" = basis points of vol
+  function genNextMinute(prevBar, volBp = 25) {
+    const t = (prevBar.time + 60); // +1 minute (seconds epoch)
+    const drift = 0; // set small drift if you want an up/down bias
+    const vol = prevBar.close * (volBp / 10000);
+    const delta = (Math.random() - 0.5) * 2 * vol + drift;
+
+    const open = prevBar.close;
+    const close = Math.max(0.01, open + delta);
+    const high = Math.max(open, close) + Math.random()*vol*0.5;
+    const low  = Math.min(open, close) - Math.random()*vol*0.5;
+
+    return { time:t, open, high, low, close };
+  }
+
+  // Switch chart into "test mode" series (still using same series)
+  function testInitFromCurrent() {
+    if (!tfBars?.length) return;
+    const last = tfBars.at(-1);
+    baseFrom = cloneBar(last);
+    // Bootstrap 200 seed minutes so EMA/BB have data
+    testBars = [baseFrom];
+    for (let i=0;i<220;i++) testBars.push(genNextMinute(testBars.at(-1), 18));
+    candle.setData(testBars);
+    emaSeries.setData(emaFromBars(testBars, 200));
+    const bb = bbFromBars(testBars, 20, 2);
+    bbUpperSeries.setData(bb.upper);
+    bbMiddleSeries.setData(bb.middle);
+    bbLowerSeries.setData(bb.lower);
+    chart.timeScale().fitContent();
+    log('Test mode initialized with synthetic 1-minute bars');
+  }
+
+  // Append 1 minute & evaluate crossings
+  function testTick() {
+    const next = genNextMinute(testBars.at(-1), 22);
+    testBars.push(next);
+    candle.update(next);
+
+    // Update indicators incrementally
+    const emaArr = emaFromBars(testBars, 200);     // fine for test; optimize later if needed
+    emaSeries.setData(emaArr);
+    const bb = bbFromBars(testBars, 20, 2);
+    bbUpperSeries.setData(bb.upper);
+    bbMiddleSeries.setData(bb.middle);
+    bbLowerSeries.setData(bb.lower);
+
+    // Evaluate vs your saved drawings on current symbol+TF
+    const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+    const trends = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+
+    const res = evaluateCrossSuite(testBars, levels, trends, { useEMA200:true, useBB:true });
+
+    // Update signals panel with live results
+    updateSignalsPanel(res);
+
+    // Log important crossings
+    if (res.ema && res.ema.includes('cross')) {
+      log(`🎯 EMA CROSS: ${res.ema.includes('up') ? 'Price crossed ABOVE EMA200' : 'Price crossed BELOW EMA200'}`);
+    }
+    if (res.bb && res.bb.includes('cross')) {
+      log(`🎯 BB CROSS: ${res.bb.replace('_', ' ')}`);
+    }
+    res.level.forEach(L => {
+      if (L.dir.includes('cross')) {
+        log(`🎯 LEVEL CROSS: ${L.price} - ${L.dir.includes('up') ? 'Price crossed ABOVE' : 'Price crossed BELOW'}`);
+      }
+    });
+    res.trend.forEach(T => {
+      if (T.dir.includes('cross')) {
+        log(`🎯 TREND CROSS: ${T.dir.includes('up') ? 'Price crossed ABOVE trendline' : 'Price crossed BELOW trendline'}`);
+      }
+    });
+  }
+
+  // ================================================
+  // SIGNAL DISPLAY SYSTEM
+  // ================================================
+  
+  // Create a signal chip element
+  function chip(text, type = 'good') {
+    const c = document.createElement('div');
+    c.className = `chip ${type}`;
+    c.textContent = text;
+    return c;
+  }
+
+  // Update signals panel with real-time signal evaluation
+  function updateSignalsPanel(signalResults) {
+    const chipsBox = document.getElementById('chips');
+    chipsBox.innerHTML = '';
+    
+    // EMA signals
+    if (signalResults.ema) {
+      const emaText = signalResults.ema.includes('cross') 
+        ? (signalResults.ema.includes('up') ? 'EMA ↑ CROSS' : 'EMA ↓ CROSS')
+        : (signalResults.ema.includes('above') ? 'EMA Above' : 'EMA Below');
+      const emaType = signalResults.ema.includes('cross') 
+        ? (signalResults.ema.includes('up') ? 'good' : 'bad')
+        : 'warn';
+      chipsBox.appendChild(chip(emaText, emaType));
+    }
+    
+    // Bollinger Band signals
+    if (signalResults.bb) {
+      const bbText = signalResults.bb.includes('cross')
+        ? signalResults.bb.replace(/_/g, ' ').toUpperCase()
+        : signalResults.bb.replace(/_/g, ' ');
+      const bbType = signalResults.bb.includes('cross') ? 'warn' : 'good';
+      chipsBox.appendChild(chip(bbText, bbType));
+    }
+    
+    // Level crossing signals
+    signalResults.level.forEach(L => {
+      const levelText = `${L.label || L.price.toFixed(2)} ${L.dir.includes('up') ? '↑' : '↓'}`;
+      const levelType = L.dir.includes('cross') 
+        ? (L.dir.includes('up') ? 'good' : 'bad')
+        : 'warn';
+      chipsBox.appendChild(chip(levelText, levelType));
+    });
+    
+    // Trendline crossing signals
+    signalResults.trend.forEach(T => {
+      const trendText = `Trend ${T.dir.includes('up') ? '↑' : '↓'}`;
+      const trendType = T.dir.includes('cross')
+        ? (T.dir.includes('up') ? 'good' : 'bad')
+        : 'warn';
+      chipsBox.appendChild(chip(trendText, trendType));
+    });
+
+    // Show "No Signals" if empty
+    if (chipsBox.children.length === 0) {
+      chipsBox.appendChild(chip('No Active Signals', 'warn'));
+    }
+  }
+
+  // Evaluate signals for current real data
+  function evaluateCurrentSignals() {
+    if (!tfBars || tfBars.length < 2) return;
+    
+    const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+    const trends = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    const res = evaluateCrossSuite(tfBars, levels, trends, { useEMA200:true, useBB:true });
+    
+    updateSignalsPanel(res);
+  }
+
+  // Test mode controls
+  document.getElementById('testStart').onclick = ()=>{
+    if (!testBars.length) testInitFromCurrent();
+    if (TEST_TIMER) return;
+    TEST_TIMER = setInterval(testTick, testSpeedMs);
+    log('Test mode started - synthetic bars running at 4 bars/second');
+  };
+
+  document.getElementById('testStep').onclick = ()=>{
+    if (!testBars.length) testInitFromCurrent();
+    testTick();
+  };
+
+  document.getElementById('testStop').onclick = ()=>{
+    if (TEST_TIMER) { clearInterval(TEST_TIMER); TEST_TIMER = null; }
+    log('Test mode stopped');
+  };
+
+  document.getElementById('testReset').onclick = ()=>{
+    if (TEST_TIMER) { clearInterval(TEST_TIMER); TEST_TIMER = null; }
+    testBars = [];
+    // Restore original bars for current TF
+    loadSymbol(currentSymbol, currentTimeframe);
+    log('Test mode reset - restored real market data');
+  };
 
   // removeSymbol no longer needs to be global (using event delegation)
 })();

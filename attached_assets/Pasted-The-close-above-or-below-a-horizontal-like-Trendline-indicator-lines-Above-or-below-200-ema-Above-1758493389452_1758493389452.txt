@@ -1,0 +1,223 @@
+The close above or below a horizontal like. Trendline…indicator lines. Above or below 200 ema. Above or below upper or lower bollinger band. We don’t need alert now we just need to be able to test if it works. Once it works we can make that as an alert. But for testing especially when market is closed and when the lowest candle is 4hrs is gonna take time so we need to have a way to test with 1 minute now even though the market is closed and probably just manipulate the time or somethingI’ll give you:A single evaluator that checks crosses vs levels, trendlines, EMA200, Bollinger (20,2).A Test Mode that feeds the chart with fake 1-minute bars (random walk) so you can see rules fire immediately.A Replay option that steps through bars bar-by-bar with buttons.Drop these into your existing front-end.1) Universal cross evaluator (drop-in)Put this near your other utils. It expects the last two bars in bars (any timeframe: 1m/4h/1d/etc.).// --- math helpers ---
+function crossed(prevA, prevB, curA, curB) {
+  if ([prevA,prevB,curA,curB].some(v=>!Number.isFinite(v))) return false;
+  const d1 = prevA - prevB, d2 = curA - curB;
+  return (d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0);
+}
+
+function emaFromBars(bars, period) {
+  if (!bars?.length) return [];
+  const k = 2 / (period + 1);
+  let e = bars[0].close;
+  const out = [{ time: bars[0].time, value: e }];
+  for (let i=1;i<bars.length;i++) {
+    e = bars[i].close*k + e*(1-k);
+    out.push({ time: bars[i].time, value: e });
+  }
+  return out;
+}
+
+function bbFromBars(bars, period=20, mult=2) {
+  const outU=[], outM=[], outL=[];
+  const closes = bars.map(b=>b.close);
+  const sma = (arr, n, i) => {
+    if (i < n-1) return null;
+    let s=0; for (let k=i-n+1;k<=i;k++) s+=arr[k];
+    return s/n;
+  };
+  for (let i=0;i<bars.length;i++){
+    const m = sma(closes, period, i);
+    if (m == null) { outU.push(null); outM.push(null); outL.push(null); continue; }
+    let v=0; for (let k=i-period+1;k<=i;k++) v += (closes[k]-m)*(closes[k]-m);
+    const sd = Math.sqrt(v/period);
+    outU.push({ time: bars[i].time, value: m + mult*sd });
+    outM.push({ time: bars[i].time, value: m });
+    outL.push({ time: bars[i].time, value: m - mult*sd });
+  }
+  return { upper: outU.filter(Boolean), middle: outM.filter(Boolean), lower: outL.filter(Boolean) };
+}
+
+function valueOnTrendAt(tr, t) {
+  if (tr.endTime === tr.startTime) return tr.startPrice;
+  const m = (tr.endPrice - tr.startPrice) / (tr.endTime - tr.startTime);
+  return tr.startPrice + m * (t - tr.startTime);
+}
+
+// --- main evaluator ---
+// inputs:
+//  bars: [{time,open,high,low,close}, ...]  (must have >=2)
+//  levels: [{id, price, label?}, ...]
+//  trends: [{id, startTime, startPrice, endTime, endPrice, label?}, ...]
+//  opts: { useEMA200: boolean, useBB: boolean }
+function evaluateCrossSuite(bars, levels=[], trends=[], opts={ useEMA200:true, useBB:true }) {
+  const N = bars.length;
+  if (N < 2) return { ema:null, bb:null, level:[], trend:[] };
+
+  const prev = bars[N-2].close;
+  const cur  = bars[N-1].close;
+  const tPrev= bars[N-2].time;
+  const tCur = bars[N-1].time;
+
+  const out = { ema:null, bb:null, level:[], trend:[] };
+
+  // EMA200
+  if (opts.useEMA200) {
+    const ema200 = emaFromBars(bars, 200);
+    const ePrev = ema200[ema200.length-2]?.value;
+    const eCur  = ema200[ema200.length-1]?.value;
+    if (Number.isFinite(ePrev) && Number.isFinite(eCur)) {
+      if (crossed(prev, ePrev, cur, eCur)) {
+        out.ema = (cur > eCur) ? 'ema_cross_up' : 'ema_cross_down';
+      } else {
+        out.ema = (cur >= eCur) ? 'ema_above' : 'ema_below';
+      }
+    }
+    out._emaValue = eCur; // optional for display
+  }
+
+  // Bollinger (20,2)
+  if (opts.useBB) {
+    const bb = bbFromBars(bars, 20, 2);
+    const uPrev = bb.upper.at(-2)?.value, uCur = bb.upper.at(-1)?.value;
+    const lPrev = bb.lower.at(-2)?.value, lCur = bb.lower.at(-1)?.value;
+
+    if (Number.isFinite(uPrev) && Number.isFinite(uCur)) {
+      if (crossed(prev, uPrev, cur, uCur)) out.bb = (cur > uCur) ? 'above_upper_cross' : 'below_upper_cross';
+      else if (cur > uCur) out.bb = 'above_upper';
+    }
+    if (Number.isFinite(lPrev) && Number.isFinite(lCur)) {
+      if (crossed(prev, lPrev, cur, lCur)) out.bb = (cur < lCur) ? 'below_lower_cross' : 'above_lower_cross';
+      else if (cur < lCur) out.bb = 'below_lower';
+    }
+    out._bbUpper = uCur; out._bbLower = lCur; // optional
+  }
+
+  // Levels
+  for (const L of levels) {
+    const p = +L.price;
+    if (!Number.isFinite(p)) continue;
+    if (crossed(prev, p, cur, p)) {
+      out.level.push({ id:L.id, dir: cur > p ? 'cross_up' : 'cross_down', price:p, label:L.label||null });
+    } else {
+      out.level.push({ id:L.id, dir: cur > p ? 'above' : 'below', price:p, label:L.label||null });
+    }
+  }
+
+  // Trendlines
+  for (const tr of trends) {
+    const yPrev = valueOnTrendAt(tr, tPrev);
+    const yCur  = valueOnTrendAt(tr, tCur);
+    if (!Number.isFinite(yPrev) || !Number.isFinite(yCur)) continue;
+    if (crossed(prev, yPrev, cur, yCur)) {
+      out.trend.push({ id: tr.id, dir: cur > yCur ? 'cross_up' : 'cross_down' });
+    } else {
+      out.trend.push({ id: tr.id, dir: cur > yCur ? 'above' : 'below' });
+    }
+  }
+
+  return out;
+}
+How to use it after any update: 
+const res = evaluateCrossSuite(currentBars, levelsForSymTF, trendsForSymTF, { useEMA200:true, useBB:true });
+// e.g. dump to a “Signals” panel for testing:
+console.log('TEST:', res);
+2) Test Mode (fake 1-minute bars)This lets you test crossings live without market data. It generates 1-minute candles around the latest close and appends them fast (e.g., 250ms per bar). You’ll see EMA/BB/levels/trendlines interactions in real time.UI controls (add near your header)<div id="testbox" style="margin-left:auto; display:flex; gap:6px; align-items:center;">
+  <span style="opacity:.7">Test Mode:</span>
+  <button id="testStart">Start</button>
+  <button id="testStep">Step</button>
+  <button id="testStop">Stop</button>
+  <button id="testReset">Reset</button>
+</div>
+Generator + wiring
+// --- Test Mode state ---
+let TEST_TIMER = null;
+let testBars = [];          // 1m bars we’re generating
+let baseFrom = null;        // start from last real close
+let testSpeedMs = 250;      // 4 bars/sec; tweak to taste
+
+function cloneBar(b){ return { time:b.time, open:b.open, high:b.high, low:b.low, close:b.close }; }
+
+// random-walk 1m bar around last close; “volBp” = basis points of vol
+function genNextMinute(prevBar, volBp = 25) {
+  const t = (prevBar.time + 60); // +1 minute (seconds epoch)
+  const drift = 0; // set small drift if you want an up/down bias
+  const vol = prevBar.close * (volBp / 10000);
+  const delta = (Math.random() - 0.5) * 2 * vol + drift;
+
+  const open = prevBar.close;
+  const close = Math.max(0.01, open + delta);
+  const high = Math.max(open, close) + Math.random()*vol*0.5;
+  const low  = Math.min(open, close) - Math.random()*vol*0.5;
+
+  return { time:t, open, high, low, close };
+}
+
+// switch chart into “test mode” series (still using same series)
+function testInitFromCurrent() {
+  if (!tfBars?.length) return;
+  const last = tfBars.at(-1);
+  baseFrom = cloneBar(last);
+  // bootstrap 200 seed minutes so EMA/BB have data
+  testBars = [baseFrom];
+  for (let i=0;i<220;i++) testBars.push(genNextMinute(testBars.at(-1), 18));
+  candle.setData(testBars);
+  emaSeries.setData(emaFromBars(testBars, 200));
+  const bb = bbFromBars(testBars, 20, 2);
+  bbUpperSeries.setData(bb.upper);
+  bbMiddleSeries.setData(bb.middle);
+  bbLowerSeries.setData(bb.lower);
+  chart.timeScale().fitContent();
+}
+
+// append 1 minute & evaluate crossings
+function testTick() {
+  const next = genNextMinute(testBars.at(-1), 22);
+  testBars.push(next);
+  candle.update(next);
+
+  // update indicators incrementally
+  const emaArr = emaFromBars(testBars, 200);     // fine for test; optimize later if needed
+  emaSeries.setData(emaArr);
+  const bb = bbFromBars(testBars, 20, 2);
+  bbUpperSeries.setData(bb.upper);
+  bbMiddleSeries.setData(bb.middle);
+  bbLowerSeries.setData(bb.lower);
+
+  // evaluate vs your saved drawings on current symbol+TF
+  const levels = loadLevels(currentSymbol, currentTF);
+  const trends = loadTrends(currentSymbol, currentTF);
+
+  const res = evaluateCrossSuite(testBars, levels, trends, { useEMA200:true, useBB:true });
+
+  // Display to your Signals panel (example)
+  const chipsBox = document.getElementById('chips');
+  chipsBox.innerHTML = '';
+  if (res.ema) chipsBox.appendChild(chip(res.ema.includes('up')?'EMA ↑':'EMA ↓', res.ema.includes('up')?'good':'bad'));
+  if (res.bb)  chipsBox.appendChild(chip(res.bb.replaceAll('_',' '), 'warn'));
+  res.level.forEach(L => chipsBox.appendChild(chip(`Level ${L.label||L.price} ${L.dir.includes('up')?'↑':'↓'}`, L.dir.includes('up')?'good':'bad')));
+  res.trend.forEach(T => chipsBox.appendChild(chip(`Trend ${T.dir.includes('up')?'↑':'↓'}`, T.dir.includes('up')?'good':'bad')));
+}
+
+// controls
+document.getElementById('testStart').onclick = ()=>{
+  if (!testBars.length) testInitFromCurrent();
+  if (TEST_TIMER) return;
+  TEST_TIMER = setInterval(testTick, testSpeedMs);
+};
+
+document.getElementById('testStep').onclick = ()=>{
+  if (!testBars.length) testInitFromCurrent();
+  testTick();
+};
+
+document.getElementById('testStop').onclick = ()=>{
+  if (TEST_TIMER) { clearInterval(TEST_TIMER); TEST_TIMER = null; }
+};
+
+document.getElementById('testReset').onclick = ()=>{
+  if (TEST_TIMER) { clearInterval(TEST_TIMER); TEST_TIMER = null; }
+  testBars = [];
+  // restore original bars for current TF
+  applyTF(currentTF); // your existing function to redraw normal data
+};
+What this gives youStart/Stop to run continuous 1m bars (synthetic).Step to add one minute at a time.Cross chips update live so you can validate the math.
