@@ -262,15 +262,71 @@
   let trendlineStart = null; // for 2-point trendline drawing
   let previewTrendline = null; // preview line while drawing
   let previewUpdateThrottle = null; // throttle preview updates for performance
-  let currentLevels = []; // active level lines on chart
-  let currentTrendlines = []; // active trendlines on chart
+  // ==== OPTIMIZED CACHES FOR BUTTERY SMOOTH PERFORMANCE ====
+  const trendSeriesById = new Map(); // id -> { series, data }
+  const levelLineById = new Map(); // id -> { line, data }
+  let currentLevels = []; // keep for compatibility
+  let currentTrendlines = []; // keep for compatibility
   let selectedLine = null; // currently selected line for editing
   let lineHandles = []; // visual handles for selected line
   let isLineSelected = false; // flag to track selection state
-  // Drag states for line interaction
-  let levelDragState = { isDragging: false, draggedLevel: null, startY: null };
-  let trendlineDragState = { isDragging: false, draggedTrendline: null, startX: null, startY: null, offsetTime: null, offsetPrice: null };
-  let endpointDragState = { isDragging: false, draggedTrendline: null, endpoint: null }; // 'start' or 'end'
+  
+  // ==== OPTIMIZED DRAG STATES ====
+  let levelDragState = { isDragging: false, id: null };
+  let trendDragState = { 
+    isDragging: false, 
+    id: null, 
+    mode: null, // 'move' | 'start' | 'end'
+    base: { time: 0, price: 0 }, 
+    start: { time: 0, price: 0 }, 
+    end: { time: 0, price: 0 } 
+  };
+  
+  // ==== SINGLE RAF LOOP FOR 60FPS SMOOTH UPDATES ====
+  let rafToken = null;
+  let lastPointer = null;
+
+  // ==== SCREEN-SPACE HIT TESTING FOR RELIABLE LINE SELECTION ====
+  function dist2(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy; }
+  function clamp01(t){ return t<0?0:t>1?1:t; }
+  function pointSegDist(px,py, x1,y1, x2,y2){
+    const A={x:x1,y:y1}, B={x:x2,y:y2}, P={x:px,y:py};
+    const AB={x:B.x-A.x, y:B.y-A.y};
+    const t = clamp01(((P.x-A.x)*AB.x + (P.y-A.y)*AB.y) / (AB.x*AB.x + AB.y*AB.y || 1));
+    const proj = { x: A.x + t*AB.x, y: A.y + t*AB.y };
+    return Math.sqrt(dist2(P, proj));
+  }
+
+  function hitTestTrendlines(px, py, tolerancePx = 10){
+    for (const [id, rec] of trendSeriesById.entries()){
+      const t = rec.data;
+      const x1 = chart.timeScale().timeToCoordinate(t.startTime);
+      const y1 = candleSeries.priceToCoordinate(t.startPrice);
+      const x2 = chart.timeScale().timeToCoordinate(t.endTime);
+      const y2 = candleSeries.priceToCoordinate(t.endPrice);
+      if ([x1,y1,x2,y2].some(v => v == null)) continue;
+      const d = pointSegDist(px, py, x1,y1,x2,y2);
+      if (d <= tolerancePx) return { id, where: d < 8 ? 'segment' : 'near' };
+    }
+    return null;
+  }
+
+  function hitTestLevel(px, py, tolerancePx = 8){
+    for (const [id, rec] of levelLineById.entries()){
+      const y = candleSeries.priceToCoordinate(rec.data.price);
+      if (y == null) continue;
+      if (Math.abs(py - y) <= tolerancePx) return { id };
+    }
+    return null;
+  }
+
+  // ==== PERFORMANCE FREEZING DURING DRAG ====
+  function freezeDuringDrag(on) {
+    chart.applyOptions({
+      crosshair: { mode: on ? LightweightCharts.CrosshairMode.Hidden : LightweightCharts.CrosshairMode.Magnet },
+      rightPriceScale: { autoScale: !on }
+    });
+  }
 
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
@@ -981,131 +1037,103 @@
   }
 
   function drawTrendlinesOnChart() {
-    // Clear existing trendlines
-    currentTrendlines.forEach(line => chart.removeSeries(line));
-    currentTrendlines = [];
-    
-    // Draw current symbol's trendlines for current timeframe
-    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-    
-    // Sanitize and validate trendlines before drawing
-    const validTrendlines = symbolTrendlines.filter(t => 
-      t && 
-      t.startTime != null && 
-      t.endTime != null && 
-      Number.isFinite(t.startPrice) && 
-      Number.isFinite(t.endPrice)
-    );
-    
-    validTrendlines.forEach((trendline, index) => {
-      try {
-        // Check if trendline is in visible TIME range to prevent chart auto-expansion
-        const startInRange = isTimeInVisibleRange(trendline.startTime);
-        const endInRange = isTimeInVisibleRange(trendline.endTime);
-        
-        // Skip drawing if completely outside visible time range
-        if (!startInRange && !endInRange) {
-          return; // Skip drawing - line is completely outside visible time area
-        }
-        
-        const trendlineSeries = chart.addLineSeries({
-          color: trendline.selected ? '#22d3ee' : (trendline.color || '#f59e0b'),
-          lineWidth: trendline.selected ? 5 : 2, // Much thicker when selected
-          lineStyle: 0
-        });
-        
-        // ALWAYS prevent trendlines from affecting autoscale to avoid chart expansion
-        trendlineSeries.applyOptions({
-          autoscaleInfoProvider: () => null
-        });
-        
-        // Create line data with extra validation
-        const lineData = [
-          { time: trendline.startTime, value: trendline.startPrice },
-          { time: trendline.endTime, value: trendline.endPrice }
-        ];
-        
-        // Strict validation before setData
-        const isValidData = lineData.every(point => 
-          point.time != null && 
-          point.value != null &&
-          Number.isFinite(point.time) && 
-          Number.isFinite(point.value) &&
-          point.time > 0 &&
-          !isNaN(point.value)
-        );
-        
-        if (isValidData) {
-          trendlineSeries.setData(lineData);
-          // Store reference to trendline data for selection
-          trendlineSeries._trendlineData = trendline;
-          trendlineSeries._trendlineIndex = index;
-          currentTrendlines.push(trendlineSeries);
-        } else {
-          console.warn('[EOD] Skipped invalid trendline data:', lineData);
-          chart.removeSeries(trendlineSeries);
-          // Remove this invalid trendline from storage (using per-timeframe storage)
-          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-          const updatedTrendlines = symbolTrendlines.filter(t => t.id !== trendline.id);
-          saveTrendlinesForSymbol(currentSymbol, currentTimeframe, updatedTrendlines);
-        }
-      } catch (error) {
-        console.error('[EOD] Error drawing trendline:', error, trendline);
+    const symbolTrendlines = (getTrendlinesForSymbol(currentSymbol, currentTimeframe) || [])
+      .filter(t =>
+        t && t.id != null &&
+        Number.isFinite(t.startTime) && Number.isFinite(t.endTime) &&
+        Number.isFinite(t.startPrice) && Number.isFinite(t.endPrice)
+      );
+
+    // --- remove ones that no longer exist ---
+    for (const [id, rec] of trendSeriesById.entries()) {
+      if (!symbolTrendlines.find(t => t.id === id)) {
+        chart.removeSeries(rec.series);
+        trendSeriesById.delete(id);
       }
-    });
-    
-    // Clean up invalid trendlines from storage if we filtered any out
-    if (validTrendlines.length !== symbolTrendlines.length) {
-      saveTrendlinesForSymbol(currentSymbol, currentTimeframe, validTrendlines);
-      log(`Cleaned up ${symbolTrendlines.length - validTrendlines.length} invalid trendlines`);
     }
+
+    // --- upsert the rest (no full clear) ---
+    for (const t of symbolTrendlines) {
+      const inRange =
+        isTimeInVisibleRange(t.startTime) || isTimeInVisibleRange(t.endTime);
+      if (!inRange) continue; // don't expand chart
+
+      const lineData = [
+        { time: t.startTime, value: t.startPrice },
+        { time: t.endTime,   value: t.endPrice   },
+      ];
+      if (!lineData.every(p => Number.isFinite(p.time) && Number.isFinite(p.value))) continue;
+
+      let rec = trendSeriesById.get(t.id);
+      if (!rec) {
+        const series = chart.addLineSeries({
+          color: t.selected ? '#22d3ee' : (t.color || '#f59e0b'),
+          lineWidth: t.selected ? 5 : 2,
+          lineStyle: 0,
+        });
+        // stop autoscale influence
+        series.applyOptions({ autoscaleInfoProvider: () => null });
+        rec = { series, data: t };
+        trendSeriesById.set(t.id, rec);
+      } else {
+        // only restyle if selection/color changed
+        rec.series.applyOptions({
+          color: t.selected ? '#22d3ee' : (t.color || '#f59e0b'),
+          lineWidth: t.selected ? 5 : 2,
+        });
+        rec.data = t;
+      }
+
+      rec.series.setData(lineData);
+    }
+
+    // mirror into your external array if other code reads it
+    currentTrendlines = [...trendSeriesById.values()].map(r => r.series);
   }
 
   function drawLevelsOnChart() {
-    try {
-      // Clear existing level lines
-      currentLevels.forEach(line => {
-        try {
-          candleSeries.removePriceLine(line);
-        } catch (error) {
-          console.warn('[EOD] Error removing price line:', error);
-        }
-      });
-      currentLevels = [];
-      
-      // Draw current symbol's levels for current timeframe
-      const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
-      
-      // Validate levels before drawing
-      const validLevels = symbolLevels.filter(level => 
-        level && 
-        level.price !== null && 
-        level.price !== undefined && 
-        Number.isFinite(level.price) && 
-        level.price > 0
-      );
-      
-      validLevels.forEach((level, index) => {
-        try {
-          const priceLine = {
-            price: level.price,
-            color: level.selected ? '#22d3ee' : (level.color || '#60a5fa'),
-            lineWidth: level.selected ? 5 : 2, // Much thicker when selected
-            lineStyle: 0, // solid line, thicker
-            axisLabelVisible: true,
-            title: `Level ${level.price.toFixed(2)}`
-          };
-          const line = candleSeries.createPriceLine(priceLine);
-          line._levelData = level;
-          line._levelIndex = index;
-          currentLevels.push(line);
-        } catch (error) {
-          console.warn(`[EOD] Error creating level line for price ${level.price}:`, error);
-        }
-      });
-    } catch (error) {
-      console.error('[EOD] Critical error in drawLevelsOnChart:', error);
+    const symbolLevels = (getLevelsForSymbol(currentSymbol, currentTimeframe) || [])
+      .filter(L => L && L.id != null && Number.isFinite(L.price) && L.price > 0);
+
+    // remove deleted
+    for (const [id, rec] of levelLineById.entries()) {
+      if (!symbolLevels.find(L => L.id === id)) {
+        try { candleSeries.removePriceLine(rec.line); } catch {}
+        levelLineById.delete(id);
+      }
     }
+
+    // upsert
+    for (const L of symbolLevels) {
+      const existing = levelLineById.get(L.id);
+      const opts = {
+        price: L.price,
+        color: L.selected ? '#22d3ee' : (L.color || '#60a5fa'),
+        lineWidth: L.selected ? 5 : 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: `Level ${(+L.price).toFixed(2)}`
+      };
+
+      if (!existing) {
+        const line = candleSeries.createPriceLine(opts);
+        levelLineById.set(L.id, { line, data: L });
+      } else {
+        // recreate only if price OR style changed
+        const changed = existing.data.price !== L.price ||
+                        existing.data.selected !== L.selected ||
+                        existing.data.color !== L.color;
+        if (changed) {
+          try { candleSeries.removePriceLine(existing.line); } catch {}
+          const line = candleSeries.createPriceLine(opts);
+          levelLineById.set(L.id, { line, data: L });
+        } else {
+          existing.data = L;
+        }
+      }
+    }
+
+    currentLevels = [...levelLineById.values()].map(r => r.line);
   }
 
   // ---- Chart Interaction

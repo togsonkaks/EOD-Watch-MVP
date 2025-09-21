@@ -1,0 +1,219 @@
+1) Trendlines: draw & update (diffing, no autoscale jump)
+// ==== caches ====
+const trendSeriesById = new Map(); // id -> { series, data }
+let currentTrendlines = [];         // keep your in-memory array if you like
+
+function drawTrendlinesOnChart() {
+  const symbolTrendlines = (getTrendlinesForSymbol(currentSymbol, currentTimeframe) || [])
+    .filter(t =>
+      t && t.id != null &&
+      Number.isFinite(t.startTime) && Number.isFinite(t.endTime) &&
+      Number.isFinite(t.startPrice) && Number.isFinite(t.endPrice)
+    );
+
+  // --- remove ones that no longer exist ---
+  for (const [id, rec] of trendSeriesById.entries()) {
+    if (!symbolTrendlines.find(t => t.id === id)) {
+      chart.removeSeries(rec.series);
+      trendSeriesById.delete(id);
+    }
+  }
+
+  // --- upsert the rest (no full clear) ---
+  for (const t of symbolTrendlines) {
+    const inRange =
+      isTimeInVisibleRange(t.startTime) || isTimeInVisibleRange(t.endTime);
+    if (!inRange) continue; // don’t expand chart
+
+    const lineData = [
+      { time: t.startTime, value: t.startPrice },
+      { time: t.endTime,   value: t.endPrice   },
+    ];
+    if (!lineData.every(p => Number.isFinite(p.time) && Number.isFinite(p.value))) continue;
+
+    let rec = trendSeriesById.get(t.id);
+    if (!rec) {
+      const series = chart.addLineSeries({
+        color: t.selected ? '#22d3ee' : (t.color || '#f59e0b'),
+        lineWidth: t.selected ? 5 : 2,
+        lineStyle: 0,
+      });
+      // stop autoscale influence
+      series.applyOptions({ autoscaleInfoProvider: () => null });
+      rec = { series, data: t };
+      trendSeriesById.set(t.id, rec);
+    } else {
+      // only restyle if selection/color changed
+      rec.series.applyOptions({
+        color: t.selected ? '#22d3ee' : (t.color || '#f59e0b'),
+        lineWidth: t.selected ? 5 : 2,
+      });
+      rec.data = t;
+    }
+
+    rec.series.setData(lineData);
+  }
+
+  // mirror into your external array if other code reads it
+  currentTrendlines = [...trendSeriesById.values()].map(r => r.series);
+}
+2) Horizontal levels: draw & update one, not allcreatePriceLine can’t change price; you must recreate—but only that one. Keep a Map so you don’t redraw the world.const levelLineById = new Map(); // id -> { line, data }
+let currentLevels = [];
+
+function drawLevelsOnChart() {
+  const symbolLevels = (getLevelsForSymbol(currentSymbol, currentTimeframe) || [])
+    .filter(L => L && L.id != null && Number.isFinite(L.price) && L.price > 0);
+
+  // remove deleted
+  for (const [id, rec] of levelLineById.entries()) {
+    if (!symbolLevels.find(L => L.id === id)) {
+      try { candleSeries.removePriceLine(rec.line); } catch {}
+      levelLineById.delete(id);
+    }
+  }
+
+  // upsert
+  for (const L of symbolLevels) {
+    const existing = levelLineById.get(L.id);
+    const opts = {
+      price: L.price,
+      color: L.selected ? '#22d3ee' : (L.color || '#60a5fa'),
+      lineWidth: L.selected ? 5 : 2,
+      lineStyle: 0,
+      axisLabelVisible: true,
+      title: `Level ${(+L.price).toFixed(2)}`
+    };
+
+    if (!existing) {
+      const line = candleSeries.createPriceLine(opts);
+      levelLineById.set(L.id, { line, data: L });
+    } else {
+      // recreate only if price OR style changed
+      const changed = existing.data.price !== L.price ||
+                      existing.data.selected !== L.selected ||
+                      existing.data.color !== L.color;
+      if (changed) {
+        try { candleSeries.removePriceLine(existing.line); } catch {}
+        const line = candleSeries.createPriceLine(opts);
+        levelLineById.set(L.id, { line, data: L });
+      } else {
+        existing.data = L;
+      }
+    }
+  }
+
+  currentLevels = [...levelLineById.values()].map(r => r.line);
+}
+3) Pointer interaction: silky drag with rAF + single-object updatesKey changes:No drawTrendlinesOnChart() / drawLevelsOnChart() on every move.We update just the dragged object (and its cache) in rAF.Bigger, reliable hit-handles (your updateLineHandles() can keep using DOM nodes; just call it when the drag ends or selection changes, not every tick).// drag state
+let levelDragState   = { isDragging:false, id:null };
+let trendDragState   = { isDragging:false, id:null, mode:null, // 'move' | 'start' | 'end'
+                         base:{ time:0, price:0 }, start:{ time:0, price:0 }, end:{ time:0, price:0 } };
+let rafToken = null;
+
+// helper: schedule one update/frame
+function schedule(fn) {
+  if (rafToken) return;
+  rafToken = requestAnimationFrame(() => {
+    rafToken = null;
+    fn();
+  });
+}
+
+// ========== LEVEL DRAG ==========
+chartContainer.addEventListener('mousemove', (e) => {
+  if (!levelDragState.isDragging || !levelDragState.id) return;
+  const rect = chartContainer.getBoundingClientRect();
+  const price = candleSeries.coordinateToPrice(e.clientY - rect.top);
+  if (!Number.isFinite(price) || price <= 0) return;
+
+  const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+  const idx = levels.findIndex(L => L.id === levelDragState.id);
+  if (idx < 0) return;
+
+  levels[idx].price = price; // update model
+
+  // update only that line
+  schedule(() => {
+    const rec = levelLineById.get(levelDragState.id);
+    if (!rec) return;
+    try { candleSeries.removePriceLine(rec.line); } catch {}
+    const line = candleSeries.createPriceLine({
+      price: price,
+      color: levels[idx].selected ? '#22d3ee' : (levels[idx].color || '#60a5fa'),
+      lineWidth: levels[idx].selected ? 5 : 2,
+      lineStyle: 0,
+      axisLabelVisible: true,
+      title: `Level ${(+price).toFixed(2)}`
+    });
+    levelLineById.set(levelDragState.id, { line, data: levels[idx] });
+  });
+});
+
+chartContainer.addEventListener('mouseup', () => {
+  if (levelDragState.isDragging) {
+    levelDragState = { isDragging:false, id:null };
+    saveLevelsForSymbol(currentSymbol, currentTimeframe, getLevelsForSymbol(currentSymbol, currentTimeframe));
+    updateLineHandles(); // only after drag ends
+  }
+});
+
+// ========== TRENDLINE DRAG ==========
+chartContainer.addEventListener('mousemove', (e) => {
+  if (!trendDragState.isDragging || !trendDragState.id) return;
+
+  const rect = chartContainer.getBoundingClientRect();
+  const time = chart.timeScale().coordinateToTime(e.clientX - rect.left);
+  const price = candleSeries.coordinateToPrice(e.clientY - rect.top);
+  if (time == null || !Number.isFinite(price)) return;
+
+  const arr = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+  const i = arr.findIndex(t => t.id === trendDragState.id);
+  if (i < 0) return;
+
+  const t = arr[i];
+  if (trendDragState.mode === 'move') {
+    // delta from base
+    const dt = time - trendDragState.base.time;
+    const dp = price - trendDragState.base.price;
+    t.startTime = trendDragState.start.time + dt;
+    t.startPrice= trendDragState.start.price + dp;
+    t.endTime   = trendDragState.end.time   + dt;
+    t.endPrice  = trendDragState.end.price  + dp;
+  } else if (trendDragState.mode === 'start') {
+    t.startTime = time; t.startPrice = price;
+  } else if (trendDragState.mode === 'end') {
+    t.endTime = time; t.endPrice = price;
+  }
+
+  // update only this series
+  schedule(() => {
+    const rec = trendSeriesById.get(trendDragState.id);
+    if (!rec) return;
+    rec.data = t;
+    rec.series.setData([
+      { time: t.startTime, value: t.startPrice },
+      { time: t.endTime,   value: t.endPrice },
+    ]);
+  });
+});
+
+chartContainer.addEventListener('mouseup', () => {
+  if (trendDragState.isDragging) {
+    trendDragState.isDragging = false;
+    saveTrendlinesForSymbol(currentSymbol, currentTimeframe, getTrendlinesForSymbol(currentSymbol, currentTimeframe));
+    updateLineHandles(); // reposition handles once at end
+  }
+});
+Starting drags / selecting targetsWherever you set mousedown for selecting a level or a trendline, initialize:// level mousedown
+levelDragState = { isDragging:true, id: levelId };
+
+// trendline mousedown
+trendDragState = {
+  isDragging: true,
+  id: trendId,
+  mode: 'move',       // or 'start' / 'end' based on handle hit
+  base:  { time: hitTime, price: hitPrice },
+  start: { time: t.startTime, price: t.startPrice },
+  end:   { time: t.endTime,   price: t.endPrice },
+};
+Make selection easy (bigger hit areas)Keep your updateLineHandles() but give each handle a min 14–16px square and set pointer-events:auto. Only call it on:load / timeframe changeselect/unselectdrag endWhy this feels “buttery”We never rebuild all lines on every mousemove.We never trigger autoscale because trendlines are excluded from it.We rAF-throttle UI updates (≤ 60 fps).Only the changed object is touched.If you want, send me your “mousedown / hit-test” code next and I’ll tune the selection logic (fast pixel-distance check against the projected line with a tolerance so hover feels sticky).

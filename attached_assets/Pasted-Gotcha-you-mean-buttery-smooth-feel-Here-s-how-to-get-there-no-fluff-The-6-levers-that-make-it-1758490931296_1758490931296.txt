@@ -1,0 +1,162 @@
+Gotcha — you mean “buttery-smooth” feel. Here’s how to get there, no fluff.The 6 levers that make it smoothPointer events + capture (not mouse events) → no missed frames while dragging.rAF loop: update at most once per frame, not per event.Update just the thing you’re moving (no global redraws).Screen-space hit-testing (distance to segment) → stable hover + easy grabs.Freeze expensive stuff during drag (no autoscale/crosshair churn).Avoid GC: reuse objects; don’t recreate series/lines until drop.Below are drop-in upgrades focused on smoothness (you can paste them over your current handlers).// one-time: turn your listeners into pointer events
+chartContainer.addEventListener('pointerdown', onPointerDown);
+chartContainer.addEventListener('pointermove', onPointerMove, { passive: true });
+chartContainer.addEventListener('pointerup',   onPointerUp);
+chartContainer.addEventListener('pointercancel', onPointerUp);
+
+function onPointerDown(e){
+  chartContainer.setPointerCapture(e.pointerId);
+  // ... your selection logic; set levelDragState / trendDragState etc.
+}
+
+function onPointerUp(e){
+  try { chartContainer.releasePointerCapture(e.pointerId); } catch {}
+  // finalize: save to storage, rebuild handles once, clear drag states
+  if (levelDragState.isDragging) {
+    levelDragState = { isDragging:false, id:null };
+    saveLevelsForSymbol(currentSymbol, currentTimeframe, getLevelsForSymbol(currentSymbol, currentTimeframe));
+    updateLineHandles();
+  }
+  if (trendDragState.isDragging) {
+    trendDragState.isDragging = false;
+    saveTrendlinesForSymbol(currentSymbol, currentTimeframe, getTrendlinesForSymbol(currentSymbol, currentTimeframe));
+    updateLineHandles();
+  }
+}
+2) rAF throttle (single composer) 
+let rafToken = null;
+let lastPointer = null;
+
+function onPointerMove(e){
+  lastPointer = e;               // stash the latest event
+  if (rafToken) return;          // already queued
+  rafToken = requestAnimationFrame(processPointer);
+}
+
+function processPointer(){
+  rafToken = null;
+  if (!lastPointer) return;
+
+  const rect  = chartContainer.getBoundingClientRect();
+  const px = lastPointer.clientX - rect.left;
+  const py = lastPointer.clientY - rect.top;
+
+  // Convert once per frame
+  const time  = chart.timeScale().coordinateToTime(px);
+  const price = candleSeries.coordinateToPrice(py);
+
+  // 1) drag level
+  if (levelDragState.isDragging && levelDragState.id && Number.isFinite(price) && price > 0){
+    const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+    const i = levels.findIndex(L => L.id === levelDragState.id);
+    if (i >= 0 && levels[i].price !== price){
+      levels[i].price = price;                   // update model
+      // update only that line (recreate just 1 priceLine)
+      const rec = levelLineById.get(levelDragState.id);
+      if (rec){ try { candleSeries.removePriceLine(rec.line); } catch {}
+        const line = candleSeries.createPriceLine({
+          price,
+          color: levels[i].selected ? '#22d3ee' : (levels[i].color || '#60a5fa'),
+          lineWidth: levels[i].selected ? 5 : 2,
+          lineStyle: 0, axisLabelVisible: true, title: `Level ${price.toFixed(2)}`
+        });
+        levelLineById.set(levelDragState.id, { line, data: levels[i] });
+      }
+    }
+  }
+
+  // 2) drag trendline
+  if (trendDragState.isDragging && trendDragState.id && time != null && Number.isFinite(price)){
+    const arr = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    const idx = arr.findIndex(t => t.id === trendDragState.id);
+    if (idx >= 0){
+      const t = arr[idx];
+      if (trendDragState.mode === 'move'){
+        const dt = time  - trendDragState.base.time;
+        const dp = price - trendDragState.base.price;
+        t.startTime  = trendDragState.start.time  + dt;
+        t.startPrice = trendDragState.start.price + dp;
+        t.endTime    = trendDragState.end.time    + dt;
+        t.endPrice   = trendDragState.end.price   + dp;
+      } else if (trendDragState.mode === 'start'){
+        t.startTime = time; t.startPrice = price;
+      } else if (trendDragState.mode === 'end'){
+        t.endTime = time; t.endPrice = price;
+      }
+      const rec = trendSeriesById.get(trendDragState.id);
+      if (rec){
+        rec.data = t; // keep cache in sync
+        rec.series.setData([
+          { time: t.startTime, value: t.startPrice },
+          { time: t.endTime,   value: t.endPrice   },
+        ]);
+      }
+    }
+  }
+
+  // 3) hover feedback (optional): compute once per frame
+  //    do your hit-testing here; update cursor/handles classNames
+}
+
+3) Robust, sticky hit-testing (screen space)Use distance-to-segment in pixels, not price/time space. It’s consistent at any zoom.function dist2(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy; }
+function clamp01(t){ return t<0?0:t>1?1:t; }
+function pointSegDist(px,py, x1,y1, x2,y2){
+  const A={x:x1,y:y1}, B={x:x2,y:y2}, P={x:px,y:py};
+  const AB={x:B.x-A.x, y:B.y-A.y};
+  const t = clamp01(((P.x-A.x)*AB.x + (P.y-A.y)*AB.y) / (AB.x*AB.x + AB.y*AB.y || 1));
+  const proj = { x: A.x + t*AB.x, y: A.y + t*AB.y };
+  return Math.sqrt(dist2(P, proj));
+}
+
+function hitTestTrendlines(px, py, tolerancePx = 10){
+  // Precompute time/price → screen for each trendline
+  for (const [id, rec] of trendSeriesById.entries()){
+    const t = rec.data;
+    const x1 = chart.timeScale().timeToCoordinate(t.startTime);
+    const y1 = candleSeries.priceToCoordinate(t.startPrice);
+    const x2 = chart.timeScale().timeToCoordinate(t.endTime);
+    const y2 = candleSeries.priceToCoordinate(t.endPrice);
+    if ([x1,y1,x2,y2].some(v => v == null)) continue;
+    const d = pointSegDist(px, py, x1,y1,x2,y2);
+    if (d <= tolerancePx) return { id, where: d < 8 ? 'segment' : 'near' };
+  }
+  return null;
+}
+
+function hitTestLevel(px, py, tolerancePx = 8){
+  for (const [id, rec] of levelLineById.entries()){
+    const y = candleSeries.priceToCoordinate(rec.data.price);
+    if (y == null) continue;
+    if (Math.abs(py - y) <= tolerancePx) return { id };
+  }
+  return null;
+}
+Use those in onPointerDown to decide:level drag: levelDragState = { isDragging:true, id }trendline move (segment grab): trendDragState = { isDragging:true, id, mode:'move', base:{time,price}, start:{...}, end:{...} }trendline endpoint resize: if cursor is within ~10px of an endpoint, set mode:'start' or 'end'.(For endpoint hit, just check Math.hypot(px-x1, py-y1) < 10 or for end point 2.)4) Freeze expensive stuff while draggingDisable crosshair & price scale animations during drag:function freezeDuringDrag(on){
+  chart.applyOptions({
+    crosshair: { mode: on ? LightweightCharts.CrosshairMode.Disabled : LightweightCharts.CrosshairMode.Magnet },
+    rightPriceScale: { autoScale: !on }
+  });
+}
+
+// call when drag starts/ends
+// onPointerDown -> freezeDuringDrag(true)
+// onPointerUp   -> freezeDuringDrag(false)
+(You already prevented autoscale influence for trendlines with autoscaleInfoProvider: () => null; this further reduces churn.) 
+5) Small chart options that help 
+const chart = LightweightCharts.createChart(chartEl, {
+  autoSize: true,
+  layout: { background: { color: '#0f1b2b' }, textColor: '#cbd5e1' },
+  crosshair: { mode: LightweightCharts.CrosshairMode.Magnet }, // or Disabled during drag
+  grid: { vertLines: { color:'#132032' }, horzLines: { color:'#132032' } },
+  rightPriceScale: { borderVisible:false },
+  timeScale: { borderVisible:false }
+});
+const chart = LightweightCharts.createChart(chartEl, {
+  autoSize: true,
+  layout: { background: { color: '#0f1b2b' }, textColor: '#cbd5e1' },
+  crosshair: { mode: LightweightCharts.CrosshairMode.Magnet }, // or Disabled during drag
+  grid: { vertLines: { color:'#132032' }, horzLines: { color:'#132032' } },
+  rightPriceScale: { borderVisible:false },
+  timeScale: { borderVisible:false }
+});
+
