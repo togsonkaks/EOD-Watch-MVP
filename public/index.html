@@ -240,11 +240,15 @@
   const $$ = s => document.querySelectorAll(s);
   const log = m => { $('#log').textContent = m; console.log('[EOD]', m); };
 
-  // ---- Application State with fresh start
-  // Clear all potentially corrupted localStorage to fix chart issues
-  console.log('[EOD] Clearing localStorage to fix chart corruption');
-  localStorage.removeItem('eod-levels');
-  localStorage.removeItem('eod-trendlines');
+  // ---- Application State with safe migration
+  // One-time migration cleanup (only run once to prevent data loss)
+  const migrationVersion = localStorage.getItem('eod-migration-version');
+  if (!migrationVersion || migrationVersion < '2.0') {
+    console.log('[EOD] Running one-time migration - upgrading data format');
+    localStorage.removeItem('eod-levels');
+    localStorage.removeItem('eod-trendlines');
+    localStorage.setItem('eod-migration-version', '2.0');
+  }
   
   let watchlist = JSON.parse(localStorage.getItem('eod-watchlist') || '["AAPL", "META", "TSLA", "GOOGL", "MSFT"]');
   let currentSymbol = localStorage.getItem('eod-current-symbol') || 'AAPL';
@@ -267,6 +271,9 @@
   let levelDragState = { isDragging: false, draggedLevel: null, startY: null };
   let trendlineDragState = { isDragging: false, draggedTrendline: null, startX: null, startY: null, offsetTime: null, offsetPrice: null };
   let endpointDragState = { isDragging: false, draggedTrendline: null, endpoint: null }; // 'start' or 'end'
+  // Throttling for smooth drag performance
+  let lastUpdateTime = 0;
+  const UPDATE_THROTTLE_MS = 16; // ~60fps max update rate
 
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
@@ -963,6 +970,19 @@
     });
   }
 
+  // Check if a point is within the visible TIME range (simplified approach)
+  function isTimeInVisibleRange(time) {
+    try {
+      const timeRange = chart.timeScale().getVisibleRange();
+      if (!timeRange) return true; // If can't determine range, allow drawing
+      
+      return time >= timeRange.from && time <= timeRange.to;
+    } catch (error) {
+      console.warn('[EOD] Error checking visible time range:', error);
+      return true; // If error, allow drawing to prevent functional regression
+    }
+  }
+
   function drawTrendlinesOnChart() {
     // Clear existing trendlines
     currentTrendlines.forEach(line => chart.removeSeries(line));
@@ -982,10 +1002,24 @@
     
     validTrendlines.forEach((trendline, index) => {
       try {
+        // Check if trendline is in visible TIME range to prevent chart auto-expansion
+        const startInRange = isTimeInVisibleRange(trendline.startTime);
+        const endInRange = isTimeInVisibleRange(trendline.endTime);
+        
+        // Skip drawing if completely outside visible time range
+        if (!startInRange && !endInRange) {
+          return; // Skip drawing - line is completely outside visible time area
+        }
+        
         const trendlineSeries = chart.addLineSeries({
           color: trendline.selected ? '#22d3ee' : (trendline.color || '#f59e0b'),
           lineWidth: trendline.selected ? 5 : 2, // Much thicker when selected
           lineStyle: 0
+        });
+        
+        // ALWAYS prevent trendlines from affecting autoscale to avoid chart expansion
+        trendlineSeries.applyOptions({
+          autoscaleInfoProvider: () => null
         });
         
         // Create line data with extra validation
@@ -1166,6 +1200,11 @@
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
+          // Throttle updates for smoothness
+          const now = Date.now();
+          if (now - lastUpdateTime < UPDATE_THROTTLE_MS) return;
+          lastUpdateTime = now;
+          
           // Update the level price in real-time
           const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
           const levelIndex = symbolLevels.findIndex(l => l.id === levelDragState.draggedLevel.data.id);
@@ -1173,14 +1212,15 @@
             symbolLevels[levelIndex].price = newPrice;
             levelDragState.draggedLevel.data.price = newPrice;
             
-            // Real-time visual update
-            try {
-              saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
-              drawLevelsOnChart();
-              updateLineHandles();
-            } catch (error) {
-              console.warn('[EOD] Error during level line drag:', error);
-            }
+            // Throttled visual update for smoothness
+            requestAnimationFrame(() => {
+              try {
+                drawLevelsOnChart();
+                updateLineHandles();
+              } catch (error) {
+                console.warn('[EOD] Error during level line drag:', error);
+              }
+            });
           }
         }
       }
@@ -1194,6 +1234,11 @@
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
+          // Throttle updates for smoothness
+          const now = Date.now();
+          if (now - lastUpdateTime < UPDATE_THROTTLE_MS) return;
+          lastUpdateTime = now;
+          
           const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
           const trendlineIndex = symbolTrendlines.findIndex(t => t.id === endpointDragState.draggedTrendline.id);
           
@@ -1206,14 +1251,15 @@
               symbolTrendlines[trendlineIndex].endPrice = newPrice;
             }
             
-            // Real-time visual update
-            try {
-              saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
-              drawTrendlinesOnChart();
-              updateLineHandles();
-            } catch (error) {
-              console.warn('[EOD] Error during endpoint drag:', error);
-            }
+            // Throttled visual update for smoothness
+            requestAnimationFrame(() => {
+              try {
+                drawTrendlinesOnChart();
+                updateLineHandles();
+              } catch (error) {
+                console.warn('[EOD] Error during endpoint drag:', error);
+              }
+            });
           }
         }
       }
@@ -1227,6 +1273,11 @@
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
+          // Throttle updates for smoothness
+          const now = Date.now();
+          if (now - lastUpdateTime < UPDATE_THROTTLE_MS) return;
+          lastUpdateTime = now;
+          
           // Calculate the offset from the original drag start position
           const timeDelta = newTime - trendlineDragState.offsetTime;
           const priceDelta = newPrice - trendlineDragState.offsetPrice;
@@ -1246,14 +1297,15 @@
             // Update the draggedTrendline reference
             trendlineDragState.draggedTrendline.data = symbolTrendlines[trendlineIndex];
             
-            // Real-time visual update
-            try {
-              saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
-              drawTrendlinesOnChart();
-              updateLineHandles();
-            } catch (error) {
-              console.warn('[EOD] Error during trendline drag:', error);
-            }
+            // Throttled visual update for smoothness
+            requestAnimationFrame(() => {
+              try {
+                drawTrendlinesOnChart();
+                updateLineHandles();
+              } catch (error) {
+                console.warn('[EOD] Error during trendline drag:', error);
+              }
+            });
           }
         }
       }
@@ -1371,6 +1423,14 @@
           log('⚠️ Drag position out of bounds - level not moved');
         }
         
+        // Save the final position BEFORE clearing state
+        const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+        const levelIndex = symbolLevels.findIndex(l => l.id === levelDragState.draggedLevel.data.id);
+        if (levelIndex >= 0) {
+          symbolLevels[levelIndex].price = newPrice;
+          saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
+        }
+        
         levelDragState.isDragging = false;
         levelDragState.draggedLevel = null;
         levelDragState.startY = null;
@@ -1383,7 +1443,7 @@
           kineticScroll: { touch: true, mouse: true }
         });
         
-        log(`✅ Level moved to ${newPrice.toFixed(2)} - chart interactions restored`);
+        log(`✅ Level moved to ${newPrice.toFixed(2)} - final position saved`);
       }
       
       if (trendlineDragState.isDragging) {
@@ -1394,7 +1454,24 @@
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
-          log(`✅ Trendline moved while preserving angle`);
+          // Save the final trendline position
+          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+          const trendlineIndex = symbolTrendlines.findIndex(t => t.id === trendlineDragState.draggedTrendline.data.id);
+          if (trendlineIndex >= 0) {
+            const timeDelta = newTime - trendlineDragState.offsetTime;
+            const priceDelta = newPrice - trendlineDragState.offsetPrice;
+            const originalStart = trendlineDragState.draggedTrendline.originalStart;
+            const originalEnd = trendlineDragState.draggedTrendline.originalEnd;
+            
+            symbolTrendlines[trendlineIndex].startTime = originalStart.time + timeDelta;
+            symbolTrendlines[trendlineIndex].startPrice = originalStart.price + priceDelta;
+            symbolTrendlines[trendlineIndex].endTime = originalEnd.time + timeDelta;
+            symbolTrendlines[trendlineIndex].endPrice = originalEnd.price + priceDelta;
+            
+            saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
+          }
+          
+          log(`✅ Trendline moved - final position saved`);
         } else {
           log('⚠️ Drag position out of bounds - trendline not moved');
         }
@@ -1426,7 +1503,22 @@
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
-          log(`✅ Trendline endpoint resized - angle adjusted`);
+          // Save the final endpoint position
+          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+          const trendlineIndex = symbolTrendlines.findIndex(t => t.id === endpointDragState.draggedTrendline.id);
+          
+          if (trendlineIndex >= 0) {
+            if (endpointDragState.endpoint === 'start') {
+              symbolTrendlines[trendlineIndex].startTime = newTime;
+              symbolTrendlines[trendlineIndex].startPrice = newPrice;
+            } else if (endpointDragState.endpoint === 'end') {
+              symbolTrendlines[trendlineIndex].endTime = newTime;
+              symbolTrendlines[trendlineIndex].endPrice = newPrice;
+            }
+            saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
+          }
+          
+          log(`✅ Trendline endpoint resized - final position saved`);
         } else {
           log('⚠️ Endpoint drag position out of bounds');
         }
