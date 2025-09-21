@@ -121,6 +121,20 @@ async function getDailyBarsCached(symbol, days = 600, timeframe = '1d') {
   const today = ymd(new Date());
   let { meta, bars } = await readCache(symbol, timeframe);
 
+  // Check if we're in a rate limit window
+  if (meta && meta.status === 'rate_limited' && meta.rate_limited_until) {
+    const retryTime = new Date(meta.rate_limited_until);
+    const now = new Date();
+    if (now < retryTime) {
+      console.log(`⏳ Still rate limited for ${symbol} ${timeframe} until ${retryTime.toISOString()}`);
+      throw new Error(`Rate limited until ${retryTime.toISOString()}`);
+    } else {
+      console.log(`🔄 Rate limit window expired for ${symbol} ${timeframe} - attempting fetch`);
+      // Clear the rate limit status and try again
+      meta = null;
+    }
+  }
+
   // First-time fetch
   if (!meta) {
     console.log(`📥 First-time cache miss for ${symbol} ${timeframe} - fetching historical data`);
@@ -154,10 +168,37 @@ async function getDailyBarsCached(symbol, days = 600, timeframe = '1d') {
         console.log(`✅ Cached ${bars.length} bars for ${symbol} ${timeframe} (first-time fetch)`);
       } else {
         console.log(`⚠️ No data received for ${symbol} ${timeframe} - rate limited or no data available`);
-        throw new Error(`No data available for ${symbol} ${timeframe} - rate limited`);
+        // Create a placeholder cache with retry timestamp to prevent thundering herd
+        const retryAfter = new Date();
+        retryAfter.setMinutes(retryAfter.getMinutes() + 15); // Retry in 15 minutes
+        bars = [];
+        meta = { 
+          last_fetch_at: new Date().toISOString(), 
+          last_bar_date: null,
+          rate_limited_until: retryAfter.toISOString(),
+          status: 'rate_limited'
+        };
+        await writeCache(symbol, timeframe, { meta, bars });
+        console.log(`⏳ Created placeholder cache for ${symbol} ${timeframe} - will retry after ${retryAfter.toISOString()}`);
+        throw new Error(`Rate limited - please try again later`);
       }
     } catch (error) {
       console.log(`❌ First-time fetch failed for ${symbol} ${timeframe}: ${error.message}`);
+      
+      // If we don't have a cache file yet, create a placeholder to prevent retries
+      if (!meta) {
+        const retryAfter = new Date();
+        retryAfter.setMinutes(retryAfter.getMinutes() + 15);
+        const placeholderMeta = { 
+          last_fetch_at: new Date().toISOString(), 
+          last_bar_date: null,
+          rate_limited_until: retryAfter.toISOString(),
+          status: 'rate_limited'
+        };
+        await writeCache(symbol, timeframe, { meta: placeholderMeta, bars: [] });
+        console.log(`⏳ Created error placeholder cache for ${symbol} ${timeframe}`);
+      }
+      
       throw error; // Let the API endpoint handle the error response
     }
   }
