@@ -1428,30 +1428,32 @@
       dragState.handleElement.style.left = (newX - 6) + 'px';
       dragState.handleElement.style.top = (newY - 6) + 'px';
       
-      // Update the actual line data
+      // Update the actual line data with REAL-TIME visual feedback
       if (dragState.lineType === 'trendline') {
         // Handle trendline drag (both horizontal and vertical movement)
         const newTime = chart.timeScale().coordinateToTime(newX);
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newTime !== null && newTime !== undefined && newPrice !== null && !isNaN(newPrice)) {
-          const trendlines = getTrendlinesForSymbol(currentSymbol);
-          const trendlineIndex = trendlines.findIndex(t => t.id === selectedLine.data.id);
+          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+          const trendlineIndex = symbolTrendlines.findIndex(t => t.id === selectedLine.data.id);
           if (trendlineIndex >= 0) {
             if (dragState.isStart) {
-              trendlines[trendlineIndex].startTime = newTime;
-              trendlines[trendlineIndex].startPrice = newPrice;
+              symbolTrendlines[trendlineIndex].startTime = newTime;
+              symbolTrendlines[trendlineIndex].startPrice = newPrice;
               selectedLine.data.startTime = newTime;
               selectedLine.data.startPrice = newPrice;
             } else {
-              trendlines[trendlineIndex].endTime = newTime;
-              trendlines[trendlineIndex].endPrice = newPrice;
+              symbolTrendlines[trendlineIndex].endTime = newTime;
+              symbolTrendlines[trendlineIndex].endPrice = newPrice;
               selectedLine.data.endTime = newTime;
               selectedLine.data.endPrice = newPrice;
             }
             
-            // Skip immediate redraw during drag - only update data
-            // Visual feedback will happen on mouseup
+            // REAL-TIME visual update during drag - keeps handles attached!
+            saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
+            drawTrendlinesOnChart();
+            updateLineHandles(); // Keep handles visually connected
           }
         }
         
@@ -1460,14 +1462,16 @@
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newPrice !== null && !isNaN(newPrice)) {
-          const levels = getLevelsForSymbol(currentSymbol);
-          const levelIndex = levels.findIndex(l => l.id === selectedLine.data.id);
+          const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+          const levelIndex = symbolLevels.findIndex(l => l.id === selectedLine.data.id);
           if (levelIndex >= 0) {
-            levels[levelIndex].price = newPrice;
+            symbolLevels[levelIndex].price = newPrice;
             selectedLine.data.price = newPrice;
             
-            // Skip immediate redraw during drag - only update data
-            // Visual feedback will happen on mouseup
+            // REAL-TIME visual update during drag - keeps handles attached!
+            saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
+            drawLevelsOnChart();
+            updateLineHandles(); // Keep handles visually connected
           }
         }
       }
@@ -1481,51 +1485,22 @@
       const newX = event.clientX - rect.left;
       const newY = event.clientY - rect.top;
       
-      // Final update and save
+      // Final confirmation (real-time updates happen during mousemove)
       if (dragState.lineType === 'trendline') {
-        // Handle trendline drag (both horizontal and vertical movement)
         const newTime = chart.timeScale().coordinateToTime(newX);
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newTime !== null && newTime !== undefined && newPrice !== null && !isNaN(newPrice)) {
-          const trendlines = getTrendlinesForSymbol(currentSymbol);
-          const trendlineIndex = trendlines.findIndex(t => t.id === selectedLine.data.id);
-          if (trendlineIndex >= 0) {
-            if (dragState.isStart) {
-              trendlines[trendlineIndex].startTime = newTime;
-              trendlines[trendlineIndex].startPrice = newPrice;
-              selectedLine.data.startTime = newTime;
-              selectedLine.data.startPrice = newPrice;
-            } else {
-              trendlines[trendlineIndex].endTime = newTime;
-              trendlines[trendlineIndex].endPrice = newPrice;
-              selectedLine.data.endTime = newTime;
-              selectedLine.data.endPrice = newPrice;
-            }
-            saveTrendlines();
-            drawTrendlinesOnChart();
-            updateLineHandles();
-            log('✅ Trendline resized - new position saved');
-          }
+          log('✅ Trendline resized - new position saved');
         } else {
           log('⚠️ Drag position out of bounds - trendline not moved');
         }
         
       } else if (dragState.lineType === 'level') {
-        // Handle horizontal level drag (vertical movement only)
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newPrice !== null && !isNaN(newPrice)) {
-          const levels = getLevelsForSymbol(currentSymbol);
-          const levelIndex = levels.findIndex(l => l.id === selectedLine.data.id);
-          if (levelIndex >= 0) {
-            levels[levelIndex].price = newPrice;
-            selectedLine.data.price = newPrice;
-            saveLevels();
-            drawLevelsOnChart();
-            updateLineHandles();
-            log(`✅ Level moved to ${newPrice.toFixed(2)} - new position saved`);
-          }
+          log(`✅ Level moved to ${newPrice.toFixed(2)} - new position saved`);
         } else {
           log('⚠️ Drag position out of bounds - level not moved');
         }
