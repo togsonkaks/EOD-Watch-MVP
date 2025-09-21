@@ -414,7 +414,7 @@
     return monthly;
   }
 
-  async function fetchBars(symbol, days = 600) {
+  async function fetchBars(symbol, days = 4000) {
     const url = `${API}/eod?symbol=${encodeURIComponent(symbol)}&days=${days}`;
     const r = await fetch(url);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -465,8 +465,8 @@
       $('#status-dot').className = 'status-dot status-loading';
       log(`Loading ${sym} (${timeframe})…`);
       
-      // Always fetch daily data first
-      const bars = await fetchBars(sym, 600);
+      // Always fetch daily data first (full 11+ year history)
+      const bars = await fetchBars(sym, 4000);
       if (!bars.length) { 
         log('No data returned.'); 
         $('#status-dot').className = 'status-dot status-error';
@@ -1026,26 +1026,50 @@
   }
 
   function drawLevelsOnChart() {
-    // Clear existing level lines
-    currentLevels.forEach(line => candleSeries.removePriceLine(line));
-    currentLevels = [];
-    
-    // Draw current symbol's levels
-    const symbolLevels = getLevelsForSymbol(currentSymbol);
-    symbolLevels.forEach((level, index) => {
-      const priceLine = {
-        price: level.price,
-        color: level.selected ? '#22d3ee' : (level.color || '#60a5fa'),
-        lineWidth: level.selected ? 5 : 2, // Much thicker when selected
-        lineStyle: 0, // solid line, thicker
-        axisLabelVisible: true,
-        title: `Level ${level.price.toFixed(2)}`
-      };
-      const line = candleSeries.createPriceLine(priceLine);
-      line._levelData = level;
-      line._levelIndex = index;
-      currentLevels.push(line);
-    });
+    try {
+      // Clear existing level lines
+      currentLevels.forEach(line => {
+        try {
+          candleSeries.removePriceLine(line);
+        } catch (error) {
+          console.warn('[EOD] Error removing price line:', error);
+        }
+      });
+      currentLevels = [];
+      
+      // Draw current symbol's levels for current timeframe
+      const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+      
+      // Validate levels before drawing
+      const validLevels = symbolLevels.filter(level => 
+        level && 
+        level.price !== null && 
+        level.price !== undefined && 
+        Number.isFinite(level.price) && 
+        level.price > 0
+      );
+      
+      validLevels.forEach((level, index) => {
+        try {
+          const priceLine = {
+            price: level.price,
+            color: level.selected ? '#22d3ee' : (level.color || '#60a5fa'),
+            lineWidth: level.selected ? 5 : 2, // Much thicker when selected
+            lineStyle: 0, // solid line, thicker
+            axisLabelVisible: true,
+            title: `Level ${level.price.toFixed(2)}`
+          };
+          const line = candleSeries.createPriceLine(priceLine);
+          line._levelData = level;
+          line._levelIndex = index;
+          currentLevels.push(line);
+        } catch (error) {
+          console.warn(`[EOD] Error creating level line for price ${level.price}:`, error);
+        }
+      });
+    } catch (error) {
+      console.error('[EOD] Critical error in drawLevelsOnChart:', error);
+    }
   }
 
   // ---- Chart Interaction
@@ -1431,37 +1455,80 @@
       // Update the actual line data with REAL-TIME visual feedback
       if (dragState.lineType === 'trendline') {
         // Handle trendline drag (both horizontal and vertical movement)
-        const newTime = chart.timeScale().coordinateToTime(newX);
-        const newPrice = candleSeries.coordinateToPrice(newY);
         
-        if (newTime !== null && newTime !== undefined && newPrice !== null && !isNaN(newPrice)) {
+        // Add comprehensive validation to prevent chart crashes
+        let newTime, newPrice;
+        try {
+          newTime = chart.timeScale().coordinateToTime(newX);
+          newPrice = candleSeries.coordinateToPrice(newY);
+        } catch (error) {
+          console.warn('[EOD] Coordinate conversion error during drag:', error);
+          return; // Stop processing invalid coordinates
+        }
+        
+        // Enhanced validation: check for valid values AND reasonable bounds
+        const isValidTime = newTime !== null && newTime !== undefined && !isNaN(newTime);
+        const isValidPrice = newPrice !== null && newPrice !== undefined && !isNaN(newPrice) && isFinite(newPrice) && newPrice > 0;
+        
+        if (isValidTime && isValidPrice && selectedLine && selectedLine.data) {
           const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
           const trendlineIndex = symbolTrendlines.findIndex(t => t.id === selectedLine.data.id);
           if (trendlineIndex >= 0) {
+            // Validate the trendline data before updating
+            const currentTrendline = symbolTrendlines[trendlineIndex];
+            let startTime = currentTrendline.startTime;
+            let startPrice = currentTrendline.startPrice;
+            let endTime = currentTrendline.endTime;
+            let endPrice = currentTrendline.endPrice;
+            
             if (dragState.isStart) {
-              symbolTrendlines[trendlineIndex].startTime = newTime;
-              symbolTrendlines[trendlineIndex].startPrice = newPrice;
-              selectedLine.data.startTime = newTime;
-              selectedLine.data.startPrice = newPrice;
+              startTime = newTime;
+              startPrice = newPrice;
             } else {
-              symbolTrendlines[trendlineIndex].endTime = newTime;
-              symbolTrendlines[trendlineIndex].endPrice = newPrice;
-              selectedLine.data.endTime = newTime;
-              selectedLine.data.endPrice = newPrice;
+              endTime = newTime;
+              endPrice = newPrice;
             }
             
-            // REAL-TIME visual update during drag - keeps handles attached!
-            saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
-            drawTrendlinesOnChart();
-            updateLineHandles(); // Keep handles visually connected
+            // Ensure both points are valid before updating
+            if (startTime !== null && endTime !== null && startPrice > 0 && endPrice > 0) {
+              symbolTrendlines[trendlineIndex].startTime = startTime;
+              symbolTrendlines[trendlineIndex].startPrice = startPrice;
+              symbolTrendlines[trendlineIndex].endTime = endTime;
+              symbolTrendlines[trendlineIndex].endPrice = endPrice;
+              
+              selectedLine.data.startTime = startTime;
+              selectedLine.data.startPrice = startPrice;
+              selectedLine.data.endTime = endTime;
+              selectedLine.data.endPrice = endPrice;
+              
+              // REAL-TIME visual update during drag - keeps handles attached!
+              try {
+                saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
+                drawTrendlinesOnChart();
+                updateLineHandles(); // Keep handles visually connected
+              } catch (error) {
+                console.warn('[EOD] Error during trendline redraw:', error);
+              }
+            }
           }
         }
         
       } else if (dragState.lineType === 'level') {
         // Handle horizontal level drag (vertical movement only)
-        const newPrice = candleSeries.coordinateToPrice(newY);
         
-        if (newPrice !== null && !isNaN(newPrice)) {
+        // Add comprehensive validation to prevent chart crashes
+        let newPrice;
+        try {
+          newPrice = candleSeries.coordinateToPrice(newY);
+        } catch (error) {
+          console.warn('[EOD] Coordinate conversion error during level drag:', error);
+          return; // Stop processing invalid coordinates
+        }
+        
+        // Enhanced validation: check for valid price values
+        const isValidPrice = newPrice !== null && newPrice !== undefined && !isNaN(newPrice) && isFinite(newPrice) && newPrice > 0;
+        
+        if (isValidPrice && selectedLine && selectedLine.data) {
           const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
           const levelIndex = symbolLevels.findIndex(l => l.id === selectedLine.data.id);
           if (levelIndex >= 0) {
@@ -1469,9 +1536,13 @@
             selectedLine.data.price = newPrice;
             
             // REAL-TIME visual update during drag - keeps handles attached!
-            saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
-            drawLevelsOnChart();
-            updateLineHandles(); // Keep handles visually connected
+            try {
+              saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
+              drawLevelsOnChart();
+              updateLineHandles(); // Keep handles visually connected
+            } catch (error) {
+              console.warn('[EOD] Error during level redraw:', error);
+            }
           }
         }
       }
@@ -1539,6 +1610,46 @@
   // ---- Event Listeners
   $('#add-btn').addEventListener('click', addSymbol);
   $('#new-symbol').addEventListener('keypress', e => e.key === 'Enter' && addSymbol());
+
+  // Keyboard Delete functionality for selected lines
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Delete' && selectedLine) {
+      // Ignore Delete key when typing in inputs/textareas
+      const activeElement = document.activeElement;
+      if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA' || activeElement.contentEditable === 'true')) {
+        return; // Let the input handle the Delete key normally
+      }
+      
+      event.preventDefault(); // Prevent default browser behavior
+      
+      if (selectedLine.type === 'level') {
+        // Delete selected level line
+        const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+        const levelIndex = symbolLevels.findIndex(l => l.id === selectedLine.data.id);
+        if (levelIndex >= 0) {
+          symbolLevels.splice(levelIndex, 1);
+          saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
+          drawLevelsOnChart();
+          clearLineHandles();
+          selectedLine = null;
+          log(`🗑️ Level line deleted`);
+        }
+        
+      } else if (selectedLine.type === 'trendline') {
+        // Delete selected trendline
+        const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+        const trendlineIndex = symbolTrendlines.findIndex(t => t.id === selectedLine.data.id);
+        if (trendlineIndex >= 0) {
+          symbolTrendlines.splice(trendlineIndex, 1);
+          saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
+          drawTrendlinesOnChart();
+          clearLineHandles();
+          selectedLine = null;
+          log(`🗑️ Trendline deleted`);
+        }
+      }
+    }
+  });
 
   // Watchlist clicks
   $('#watchlist').addEventListener('click', e => {
