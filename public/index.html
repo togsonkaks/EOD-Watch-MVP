@@ -328,6 +328,164 @@
     });
   }
 
+  // ==== BUTTERY SMOOTH POINTER EVENT SYSTEM ====
+  function onPointerDown(e) {
+    const chartContainer = document.getElementById('chart');
+    chartContainer.setPointerCapture(e.pointerId);
+    
+    const rect = chartContainer.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    
+    // Start performance freezing during drag
+    freezeDuringDrag(true);
+    
+    // Use screen-space hit testing for reliable selection
+    const trendlineHit = hitTestTrendlines(px, py);
+    const levelHit = hitTestLevel(px, py);
+    
+    if (trendlineHit) {
+      const t = trendSeriesById.get(trendlineHit.id)?.data;
+      if (t) {
+        const time = chart.timeScale().coordinateToTime(px);
+        const price = candleSeries.coordinateToPrice(py);
+        
+        // Check if clicking near endpoints for resize
+        const x1 = chart.timeScale().timeToCoordinate(t.startTime);
+        const y1 = candleSeries.priceToCoordinate(t.startPrice);
+        const x2 = chart.timeScale().timeToCoordinate(t.endTime);
+        const y2 = candleSeries.priceToCoordinate(t.endPrice);
+        
+        const startDist = Math.hypot(px - x1, py - y1);
+        const endDist = Math.hypot(px - x2, py - y2);
+        
+        if (startDist <= 12) {
+          // Start endpoint resize
+          trendDragState = {
+            isDragging: true, id: trendlineHit.id, mode: 'start',
+            base: { time, price }, start: { time: t.startTime, price: t.startPrice },
+            end: { time: t.endTime, price: t.endPrice }
+          };
+        } else if (endDist <= 12) {
+          // End endpoint resize
+          trendDragState = {
+            isDragging: true, id: trendlineHit.id, mode: 'end',
+            base: { time, price }, start: { time: t.startTime, price: t.startPrice },
+            end: { time: t.endTime, price: t.endPrice }
+          };
+        } else {
+          // Whole trendline move
+          trendDragState = {
+            isDragging: true, id: trendlineHit.id, mode: 'move',
+            base: { time, price }, start: { time: t.startTime, price: t.startPrice },
+            end: { time: t.endTime, price: t.endPrice }
+          };
+        }
+        
+        chartContainer.style.cursor = trendDragState.mode === 'move' ? 'grab' : 'nw-resize';
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    } else if (levelHit) {
+      // Level drag
+      levelDragState = { isDragging: true, id: levelHit.id };
+      chartContainer.style.cursor = 'ns-resize';
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  function onPointerMove(e) {
+    lastPointer = e; // stash the latest event
+    if (rafToken) return; // already queued
+    rafToken = requestAnimationFrame(processPointer);
+  }
+
+  function processPointer() {
+    rafToken = null;
+    if (!lastPointer) return;
+
+    const rect = document.getElementById('chart').getBoundingClientRect();
+    const px = lastPointer.clientX - rect.left;
+    const py = lastPointer.clientY - rect.top;
+
+    // Convert once per frame
+    const time = chart.timeScale().coordinateToTime(px);
+    const price = candleSeries.coordinateToPrice(py);
+
+    // 1) drag level
+    if (levelDragState.isDragging && levelDragState.id && Number.isFinite(price) && price > 0) {
+      const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+      const i = levels.findIndex(L => L.id === levelDragState.id);
+      if (i >= 0 && levels[i].price !== price) {
+        levels[i].price = price; // update model
+        // update only that line (recreate just 1 priceLine)
+        const rec = levelLineById.get(levelDragState.id);
+        if (rec) {
+          try { candleSeries.removePriceLine(rec.line); } catch {}
+          const line = candleSeries.createPriceLine({
+            price,
+            color: levels[i].selected ? '#22d3ee' : (levels[i].color || '#60a5fa'),
+            lineWidth: levels[i].selected ? 5 : 2,
+            lineStyle: 0, axisLabelVisible: true, title: `Level ${price.toFixed(2)}`
+          });
+          levelLineById.set(levelDragState.id, { line, data: levels[i] });
+        }
+      }
+    }
+
+    // 2) drag trendline
+    if (trendDragState.isDragging && trendDragState.id && time != null && Number.isFinite(price)) {
+      const arr = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+      const idx = arr.findIndex(t => t.id === trendDragState.id);
+      if (idx >= 0) {
+        const t = arr[idx];
+        if (trendDragState.mode === 'move') {
+          const dt = time - trendDragState.base.time;
+          const dp = price - trendDragState.base.price;
+          t.startTime = trendDragState.start.time + dt;
+          t.startPrice = trendDragState.start.price + dp;
+          t.endTime = trendDragState.end.time + dt;
+          t.endPrice = trendDragState.end.price + dp;
+        } else if (trendDragState.mode === 'start') {
+          t.startTime = time; t.startPrice = price;
+        } else if (trendDragState.mode === 'end') {
+          t.endTime = time; t.endPrice = price;
+        }
+        const rec = trendSeriesById.get(trendDragState.id);
+        if (rec) {
+          rec.data = t; // keep cache in sync
+          rec.series.setData([
+            { time: t.startTime, value: t.startPrice },
+            { time: t.endTime, value: t.endPrice },
+          ]);
+        }
+      }
+    }
+  }
+
+  function onPointerUp(e) {
+    const chartContainer = document.getElementById('chart');
+    try { chartContainer.releasePointerCapture(e.pointerId); } catch {}
+    
+    // Stop performance freezing
+    freezeDuringDrag(false);
+    
+    // finalize: save to storage, rebuild handles once, clear drag states
+    if (levelDragState.isDragging) {
+      levelDragState = { isDragging: false, id: null };
+      saveLevelsForSymbol(currentSymbol, currentTimeframe, getLevelsForSymbol(currentSymbol, currentTimeframe));
+      updateLineHandles();
+    }
+    if (trendDragState.isDragging) {
+      trendDragState.isDragging = false;
+      saveTrendlinesForSymbol(currentSymbol, currentTimeframe, getTrendlinesForSymbol(currentSymbol, currentTimeframe));
+      updateLineHandles();
+    }
+    
+    chartContainer.style.cursor = '';
+  }
+
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
     autoSize: true,
@@ -1198,8 +1356,14 @@
       }
     });
 
-    // Subscribe to mouse move for trendline preview and level line dragging
+    // ==== SETUP BUTTERY SMOOTH POINTER EVENTS ====
     let chartContainer = document.getElementById('chart');
+    chartContainer.addEventListener('pointerdown', onPointerDown);
+    chartContainer.addEventListener('pointermove', onPointerMove, { passive: true });
+    chartContainer.addEventListener('pointerup', onPointerUp);
+    chartContainer.addEventListener('pointercancel', onPointerUp);
+
+    // Keep mousemove only for trendline preview (non-performance critical)
     chartContainer.addEventListener('mousemove', (event) => {
       if (drawingMode && drawingTool === 'trendline' && trendlineStart && previewTrendline) {
         // Throttle preview updates for better performance (max 60fps)
@@ -1218,328 +1382,11 @@
         }, 16); // ~60fps throttling
       }
       
-      // Handle level line dragging when clicking anywhere on the horizontal line
-      if (levelDragState.isDragging && levelDragState.draggedLevel) {
-        const rect = chartContainer.getBoundingClientRect();
-        const newY = event.clientY - rect.top;
-        const newPrice = candleSeries.coordinateToPrice(newY);
-        
-        if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
-          // Update the level price in real-time
-          const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
-          const levelIndex = symbolLevels.findIndex(l => l.id === levelDragState.draggedLevel.data.id);
-          if (levelIndex >= 0) {
-            symbolLevels[levelIndex].price = newPrice;
-            levelDragState.draggedLevel.data.price = newPrice;
-            
-            // Real-time visual update for immediate responsiveness
-            try {
-              drawLevelsOnChart();
-              updateLineHandles();
-            } catch (error) {
-              console.warn('[EOD] Error during level line drag:', error);
-            }
-          }
-        }
-      }
-      
-      // Handle endpoint resizing for trendlines  
-      if (endpointDragState.isDragging && endpointDragState.draggedTrendline) {
-        const rect = chartContainer.getBoundingClientRect();
-        const newX = event.clientX - rect.left;
-        const newY = event.clientY - rect.top;
-        const newTime = chart.timeScale().coordinateToTime(newX);
-        const newPrice = candleSeries.coordinateToPrice(newY);
-        
-        if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
-          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-          const trendlineIndex = symbolTrendlines.findIndex(t => t.id === endpointDragState.draggedTrendline.id);
-          
-          if (trendlineIndex >= 0) {
-            if (endpointDragState.endpoint === 'start') {
-              symbolTrendlines[trendlineIndex].startTime = newTime;
-              symbolTrendlines[trendlineIndex].startPrice = newPrice;
-            } else if (endpointDragState.endpoint === 'end') {
-              symbolTrendlines[trendlineIndex].endTime = newTime;
-              symbolTrendlines[trendlineIndex].endPrice = newPrice;
-            }
-            
-            // Real-time visual update for immediate responsiveness
-            try {
-              drawTrendlinesOnChart();
-              updateLineHandles();
-            } catch (error) {
-              console.warn('[EOD] Error during endpoint drag:', error);
-            }
-          }
-        }
-      }
-      
-      // Handle trendline dragging for moving entire lines
-      if (trendlineDragState.isDragging && trendlineDragState.draggedTrendline) {
-        const rect = chartContainer.getBoundingClientRect();
-        const newX = event.clientX - rect.left;
-        const newY = event.clientY - rect.top;
-        const newTime = chart.timeScale().coordinateToTime(newX);
-        const newPrice = candleSeries.coordinateToPrice(newY);
-        
-        if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
-          // Calculate the offset from the original drag start position
-          const timeDelta = newTime - trendlineDragState.offsetTime;
-          const priceDelta = newPrice - trendlineDragState.offsetPrice;
-          
-          // Update trendline by applying the same offset to both points (preserves angle)
-          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-          const trendlineIndex = symbolTrendlines.findIndex(t => t.id === trendlineDragState.draggedTrendline.data.id);
-          if (trendlineIndex >= 0) {
-            const originalStart = trendlineDragState.draggedTrendline.originalStart;
-            const originalEnd = trendlineDragState.draggedTrendline.originalEnd;
-            
-            symbolTrendlines[trendlineIndex].startTime = originalStart.time + timeDelta;
-            symbolTrendlines[trendlineIndex].startPrice = originalStart.price + priceDelta;
-            symbolTrendlines[trendlineIndex].endTime = originalEnd.time + timeDelta;
-            symbolTrendlines[trendlineIndex].endPrice = originalEnd.price + priceDelta;
-            
-            // Update the draggedTrendline reference
-            trendlineDragState.draggedTrendline.data = symbolTrendlines[trendlineIndex];
-            
-            // Real-time visual update for immediate responsiveness
-            try {
-              drawTrendlinesOnChart();
-              updateLineHandles();
-            } catch (error) {
-              console.warn('[EOD] Error during trendline drag:', error);
-            }
-          }
-        }
-      }
+      // OLD DRAG HANDLERS REMOVED - Now handled by optimized pointer events
     });
     
-    // Add mousedown event for level and trendline dragging
-    chartContainer.addEventListener('mousedown', (event) => {
-      // Early exit if in drawing mode or no line selected
-      if (drawingMode || !selectedLine) return;
-      
-      const rect = chartContainer.getBoundingClientRect();
-      const clickX = event.clientX - rect.left;
-      const clickY = event.clientY - rect.top;
-      
-      // PRIORITY 1: Check endpoint hits first (highest priority)
-      const endpointHit = selectedLine.type === 'trendline' ? checkEndpointHit(clickX, clickY, selectedLine.data) : null;
-      
-      if (endpointHit) {
-        // Endpoint resizing - HIGHEST PRIORITY
-        endpointDragState.isDragging = true;
-        endpointDragState.draggedTrendline = selectedLine.data;
-        endpointDragState.endpoint = endpointHit; // 'start' or 'end'
-        chartContainer.style.cursor = 'nw-resize';
-        
-        // CRITICAL: Disable chart interactions during drag
-        chart.applyOptions({ 
-          handleScroll: false, 
-          handleScale: false,
-          kineticScroll: { touch: false, mouse: false }
-        });
-        
-        // Stop all event propagation immediately
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        
-        log(`🎯 Endpoint ${endpointHit} drag started - chart interactions disabled`);
-        return; // Exit early - no other handlers should run
-      }
-      
-      // PRIORITY 2: Check line hits (medium priority)  
-      const clickedLine = findLineNearClick(clickX, clickY);
-      
-      if (clickedLine && clickedLine.data.id === selectedLine.data.id) {
-        if (selectedLine.type === 'level') {
-          // Level dragging
-          levelDragState.isDragging = true;
-          levelDragState.draggedLevel = clickedLine;
-          levelDragState.startY = clickY;
-          chartContainer.style.cursor = 'ns-resize';
-          
-          // Disable chart interactions during drag
-          chart.applyOptions({ 
-            handleScroll: false, 
-            handleScale: false,
-            kineticScroll: { touch: false, mouse: false }
-          });
-          
-          event.preventDefault();
-          event.stopPropagation();
-          event.stopImmediatePropagation();
-          
-          log(`📏 Level drag started - chart interactions disabled`);
-          return;
-          
-        } else if (selectedLine.type === 'trendline') {
-          // Whole trendline dragging
-          const currentTime = chart.timeScale().coordinateToTime(clickX);
-          const currentPrice = candleSeries.coordinateToPrice(clickY);
-          
-          if (currentTime !== null && currentPrice !== null) {
-            trendlineDragState.isDragging = true;
-            trendlineDragState.draggedTrendline = {
-              data: clickedLine.data,
-              originalStart: { time: clickedLine.data.startTime, price: clickedLine.data.startPrice },
-              originalEnd: { time: clickedLine.data.endTime, price: clickedLine.data.endPrice }
-            };
-            trendlineDragState.startX = clickX;
-            trendlineDragState.startY = clickY;
-            trendlineDragState.offsetTime = currentTime;
-            trendlineDragState.offsetPrice = currentPrice;
-            chartContainer.style.cursor = 'move';
-            
-            // Disable chart interactions during drag
-            chart.applyOptions({ 
-              handleScroll: false, 
-              handleScale: false,
-              kineticScroll: { touch: false, mouse: false }
-            });
-            
-            event.preventDefault();
-            event.stopPropagation();
-            event.stopImmediatePropagation();
-            
-            log(`📐 Whole trendline drag started - chart interactions disabled`);
-            return;
-          }
-        }
-      }
-      
-      // PRIORITY 3: Allow chart operations (lowest priority) - no blocks needed
-      // If we reach here, no line interaction was detected, so chart can handle normally
-    });
-    
-    // Add mouseup event for level and trendline dragging
-    chartContainer.addEventListener('mouseup', (event) => {
-      if (levelDragState.isDragging) {
-        const rect = chartContainer.getBoundingClientRect();
-        const newY = event.clientY - rect.top;
-        const newPrice = candleSeries.coordinateToPrice(newY);
-        
-        if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
-          log(`✅ Level moved to ${newPrice.toFixed(2)} via full-line drag`);
-        } else {
-          log('⚠️ Drag position out of bounds - level not moved');
-        }
-        
-        // Save the final position BEFORE clearing state
-        const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
-        const levelIndex = symbolLevels.findIndex(l => l.id === levelDragState.draggedLevel.data.id);
-        if (levelIndex >= 0) {
-          symbolLevels[levelIndex].price = newPrice;
-          saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
-        }
-        
-        levelDragState.isDragging = false;
-        levelDragState.draggedLevel = null;
-        levelDragState.startY = null;
-        chartContainer.style.cursor = '';
-        
-        // Re-enable chart interactions
-        chart.applyOptions({ 
-          handleScroll: true, 
-          handleScale: true,
-          kineticScroll: { touch: true, mouse: true }
-        });
-        
-        log(`✅ Level moved to ${newPrice.toFixed(2)} - final position saved`);
-      }
-      
-      if (trendlineDragState.isDragging) {
-        const rect = chartContainer.getBoundingClientRect();
-        const newX = event.clientX - rect.left;
-        const newY = event.clientY - rect.top;
-        const newTime = chart.timeScale().coordinateToTime(newX);
-        const newPrice = candleSeries.coordinateToPrice(newY);
-        
-        if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
-          // Save the final trendline position
-          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-          const trendlineIndex = symbolTrendlines.findIndex(t => t.id === trendlineDragState.draggedTrendline.data.id);
-          if (trendlineIndex >= 0) {
-            const timeDelta = newTime - trendlineDragState.offsetTime;
-            const priceDelta = newPrice - trendlineDragState.offsetPrice;
-            const originalStart = trendlineDragState.draggedTrendline.originalStart;
-            const originalEnd = trendlineDragState.draggedTrendline.originalEnd;
-            
-            symbolTrendlines[trendlineIndex].startTime = originalStart.time + timeDelta;
-            symbolTrendlines[trendlineIndex].startPrice = originalStart.price + priceDelta;
-            symbolTrendlines[trendlineIndex].endTime = originalEnd.time + timeDelta;
-            symbolTrendlines[trendlineIndex].endPrice = originalEnd.price + priceDelta;
-            
-            saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
-          }
-          
-          log(`✅ Trendline moved - final position saved`);
-        } else {
-          log('⚠️ Drag position out of bounds - trendline not moved');
-        }
-        
-        // Reset trendline drag state
-        trendlineDragState.isDragging = false;
-        trendlineDragState.draggedTrendline = null;
-        trendlineDragState.startX = null;
-        trendlineDragState.startY = null;
-        trendlineDragState.offsetTime = null;
-        trendlineDragState.offsetPrice = null;
-        chartContainer.style.cursor = '';
-        
-        // Re-enable chart interactions
-        chart.applyOptions({ 
-          handleScroll: true, 
-          handleScale: true,
-          kineticScroll: { touch: true, mouse: true }
-        });
-        
-        log(`✅ Trendline moved - chart interactions restored`);
-      }
-      
-      if (endpointDragState.isDragging) {
-        const rect = chartContainer.getBoundingClientRect();
-        const newX = event.clientX - rect.left;
-        const newY = event.clientY - rect.top;
-        const newTime = chart.timeScale().coordinateToTime(newX);
-        const newPrice = candleSeries.coordinateToPrice(newY);
-        
-        if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
-          // Save the final endpoint position
-          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-          const trendlineIndex = symbolTrendlines.findIndex(t => t.id === endpointDragState.draggedTrendline.id);
-          
-          if (trendlineIndex >= 0) {
-            if (endpointDragState.endpoint === 'start') {
-              symbolTrendlines[trendlineIndex].startTime = newTime;
-              symbolTrendlines[trendlineIndex].startPrice = newPrice;
-            } else if (endpointDragState.endpoint === 'end') {
-              symbolTrendlines[trendlineIndex].endTime = newTime;
-              symbolTrendlines[trendlineIndex].endPrice = newPrice;
-            }
-            saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
-          }
-          
-          log(`✅ Trendline endpoint resized - final position saved`);
-        } else {
-          log('⚠️ Endpoint drag position out of bounds');
-        }
-        
-        endpointDragState.isDragging = false;
-        endpointDragState.draggedTrendline = null;
-        endpointDragState.endpoint = null;
-        chartContainer.style.cursor = '';
-        
-        // Re-enable chart interactions
-        chart.applyOptions({ 
-          handleScroll: true, 
-          handleScale: true,
-          kineticScroll: { touch: true, mouse: true }
-        });
-      }
-    });
+    // OLD MOUSEDOWN HANDLER REMOVED - Now handled by optimized pointer events
+    // OLD MOUSEUP HANDLER REMOVED - Now handled by optimized pointer events
   }
 
   // Check if click is near a trendline endpoint for resizing
