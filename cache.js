@@ -44,6 +44,24 @@ function ymd(date) {
   return date.toISOString().slice(0,10); // YYYY-MM-DD
 }
 
+// Helper to get the last trading day (skip weekends)
+function getLastTradingDay() {
+  const date = new Date();
+  const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+  
+  if (dayOfWeek === 0) { // Sunday
+    date.setDate(date.getDate() - 2); // Friday
+  } else if (dayOfWeek === 6) { // Saturday  
+    date.setDate(date.getDate() - 1); // Friday
+  } else if (dayOfWeek === 1) { // Monday
+    date.setDate(date.getDate() - 3); // Friday
+  } else {
+    date.setDate(date.getDate() - 1); // Previous day
+  }
+  
+  return ymd(date);
+}
+
 async function fetchTiingoDaily(symbol, startDateYMD = null) {
   // Docs: Tiingo EOD supports ?startDate=YYYY-MM-DD to fetch from a date
   const base = `https://api.tiingo.com/tiingo/daily/${encodeURIComponent(symbol)}/prices`;
@@ -118,7 +136,7 @@ async function getDailyBarsCached(symbol, days = 600, timeframe = '1d') {
     throw new Error(`Invalid symbol format: ${symbol}`);
   }
 
-  const today = ymd(new Date());
+  const today = getLastTradingDay();
   let { meta, bars } = await readCache(symbol, timeframe);
 
   // Check if we're in a rate limit window
