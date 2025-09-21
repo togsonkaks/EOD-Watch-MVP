@@ -744,24 +744,28 @@
   }
   
   function selectLine(lineInfo) {
-    // Clear previous selections
-    getTrendlinesForSymbol(currentSymbol).forEach(t => t.selected = false);
-    getLevelsForSymbol(currentSymbol).forEach(l => l.selected = false);
+    try {
+      // Clear previous selections
+      getTrendlinesForSymbol(currentSymbol).forEach(t => t.selected = false);
+      getLevelsForSymbol(currentSymbol).forEach(l => l.selected = false);
 
-    selectedLine = lineInfo;
-    isLineSelected = true;
-    if (lineInfo.type === 'trendline') {
-      lineInfo.data.selected = true;
-      saveTrendlines();
-      drawTrendlinesOnChart();
-    } else if (lineInfo.type === 'level') {
-      lineInfo.data.selected = true;
-      saveLevels();
-      drawLevelsOnChart();
+      selectedLine = lineInfo;
+      isLineSelected = true;
+      if (lineInfo.type === 'trendline') {
+        lineInfo.data.selected = true;
+        saveTrendlines();
+        drawTrendlinesOnChart();
+      } else if (lineInfo.type === 'level') {
+        lineInfo.data.selected = true;
+        saveLevels();
+        drawLevelsOnChart();
+      }
+      showLineControls(lineInfo);
+      updateLineHandles();
+      log(`✅ SELECTED ${lineInfo.type.toUpperCase()}: Click color buttons to change, X to delete, or drag handles to resize`);
+    } catch (error) {
+      console.error('[EOD] Selection error:', error);
     }
-    showLineControls(lineInfo);
-    updateLineHandles();
-    log(`✅ SELECTED ${lineInfo.type.toUpperCase()}: Click color buttons to change, X to delete, or drag handles to resize`);
   }
 
   function deselectLine() {
@@ -814,14 +818,18 @@
     deselectLine();
   }
 
-  // Draggable handles for trendlines (fixed to prevent explosion)
-  let dragState = { isDragging: false, handleElement: null, isStart: false };
+  // Draggable handles for trendlines and levels (fixed to prevent explosion)
+  let dragState = { isDragging: false, handleElement: null, isStart: false, lineType: null };
   
   function updateLineHandles() {
     clearLineHandles();
-    if (!selectedLine || selectedLine.type!=='trendline') return;
-    const { startTime, startPrice, endTime, endPrice } = selectedLine.data;
+    if (!selectedLine) return;
+    
     const p = document.getElementById('chart');
+    
+    if (selectedLine.type === 'trendline') {
+      // Trendline handles - two endpoints
+      const { startTime, startPrice, endTime, endPrice } = selectedLine.data;
     
     const createHandle = (x, y, isStart) => { 
       if (x === null || y === null) return;
@@ -849,6 +857,7 @@
         dragState.isDragging = true;
         dragState.handleElement = handle;
         dragState.isStart = isStart;
+        dragState.lineType = 'trendline';
         handle.style.cursor = 'grabbing';
         e.preventDefault();
         e.stopPropagation();
@@ -862,23 +871,85 @@
     const sy = candleSeries.priceToCoordinate(startPrice);
     const ex = chart.timeScale().timeToCoordinate(endTime);
     const ey = candleSeries.priceToCoordinate(endPrice);
-    
-    createHandle(sx, sy, true);  // Start handle
-    createHandle(ex, ey, false); // End handle
+      
+      createHandle(sx, sy, true);  // Start handle
+      createHandle(ex, ey, false); // End handle
+      
+    } else if (selectedLine.type === 'level') {
+      // Horizontal level handle - single handle in middle for vertical movement only
+      const levelPrice = selectedLine.data.price;
+      
+      try {
+        // Use chart container center for stable positioning
+        const chartRect = p.getBoundingClientRect();
+        const middleX = chartRect.width / 2;
+        const levelY = candleSeries.priceToCoordinate(levelPrice);
+        
+        if (levelY !== null && !isNaN(levelY)) {
+          const handle = document.createElement('div');
+          handle.className = 'level-handle';
+          handle.style.cssText = `
+            position: absolute;
+            width: 16px;
+            height: 8px;
+            border: 2px solid #22d3ee;
+            border-radius: 4px;
+            background: ${selectedLine.data.color || '#60a5fa'};
+            transform: translate(-50%, -50%);
+            cursor: ns-resize;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(34, 211, 238, 0.6);
+            pointer-events: auto;
+          `;
+          handle.style.left = middleX + 'px';
+          handle.style.top = levelY + 'px';
+          
+          handle.addEventListener('mousedown', (e) => {
+            dragState.isDragging = true;
+            dragState.handleElement = handle;
+            dragState.lineType = 'level';
+            handle.style.cursor = 'grabbing';
+            e.preventDefault();
+            e.stopPropagation();
+          });
+          
+          p.appendChild(handle);
+          lineHandles.push(handle);
+        }
+      } catch (error) {
+        console.warn('[EOD] Level handle creation error:', error);
+      }
+    }
   }
   
   // Global drag handlers (only one set of listeners)
   document.addEventListener('mousemove', (e) => {
-    if (!dragState.isDragging || !dragState.handleElement) return;
+    if (!dragState.isDragging || !dragState.handleElement || !selectedLine) return;
     
-    const p = document.getElementById('chart');
-    const rect = p.getBoundingClientRect();
-    const newX = e.clientX - rect.left;
-    const newY = e.clientY - rect.top;
-    
-    // Update handle position visually
-    dragState.handleElement.style.left = newX + 'px';
-    dragState.handleElement.style.top = newY + 'px';
+    try {
+      const p = document.getElementById('chart');
+      if (!p) return;
+      
+      const rect = p.getBoundingClientRect();
+      const newX = e.clientX - rect.left;
+      const newY = e.clientY - rect.top;
+      
+      // Clamp to chart bounds during drag
+      const clampedX = Math.max(0, Math.min(newX, rect.width));
+      const clampedY = Math.max(0, Math.min(newY, rect.height));
+      
+      // Update handle position visually
+      if (dragState.lineType === 'trendline') {
+        // Trendline handles can move freely
+        dragState.handleElement.style.left = clampedX + 'px';
+        dragState.handleElement.style.top = clampedY + 'px';
+      } else if (dragState.lineType === 'level') {
+        // Level handles only move vertically
+        dragState.handleElement.style.top = clampedY + 'px';
+      }
+    } catch (error) {
+      console.warn('[EOD] Drag mousemove error:', error);
+    }
   });
   
   document.addEventListener('mouseup', () => {
@@ -888,60 +959,81 @@
       const p = document.getElementById('chart');
       const rect = p.getBoundingClientRect();
       const handleRect = dragState.handleElement.getBoundingClientRect();
-      let newX = handleRect.left - rect.left + 6; // +6 for handle center
-      let newY = handleRect.top - rect.top + 6;
+      let newX = handleRect.left - rect.left + (dragState.lineType === 'level' ? 8 : 6); // Center offset
+      let newY = handleRect.top - rect.top + (dragState.lineType === 'level' ? 4 : 6);
       
       // Clamp coordinates to chart bounds
       newX = Math.max(0, Math.min(newX, rect.width));
       newY = Math.max(0, Math.min(newY, rect.height));
       
-      const newTime = chart.timeScale().coordinateToTime(newX);
-      const newPrice = candleSeries.coordinateToPrice(newY);
-      
-      if (newTime && newPrice && !isNaN(newTime) && !isNaN(newPrice)) {
-        const trendlines = getTrendlinesForSymbol(currentSymbol);
-        const trendlineIndex = trendlines.findIndex(t => t.id === selectedLine.data.id);
-        if (trendlineIndex >= 0) {
-          if (dragState.isStart) {
-            trendlines[trendlineIndex].startTime = newTime;
-            trendlines[trendlineIndex].startPrice = newPrice;
-            selectedLine.data.startTime = newTime;
-            selectedLine.data.startPrice = newPrice;
-          } else {
-            trendlines[trendlineIndex].endTime = newTime;
-            trendlines[trendlineIndex].endPrice = newPrice;
-            selectedLine.data.endTime = newTime;
-            selectedLine.data.endPrice = newPrice;
+      if (dragState.lineType === 'trendline') {
+        // Handle trendline drag
+        const newTime = chart.timeScale().coordinateToTime(newX);
+        const newPrice = candleSeries.coordinateToPrice(newY);
+        
+        if (newTime !== null && newPrice !== null && !isNaN(newTime) && !isNaN(newPrice)) {
+          const trendlines = getTrendlinesForSymbol(currentSymbol);
+          const trendlineIndex = trendlines.findIndex(t => t.id === selectedLine.data.id);
+          if (trendlineIndex >= 0) {
+            if (dragState.isStart) {
+              trendlines[trendlineIndex].startTime = newTime;
+              trendlines[trendlineIndex].startPrice = newPrice;
+              selectedLine.data.startTime = newTime;
+              selectedLine.data.startPrice = newPrice;
+            } else {
+              trendlines[trendlineIndex].endTime = newTime;
+              trendlines[trendlineIndex].endPrice = newPrice;
+              selectedLine.data.endTime = newTime;
+              selectedLine.data.endPrice = newPrice;
+            }
+            saveTrendlines();
+            drawTrendlinesOnChart();
+            updateLineHandles();
+            log('✅ Trendline resized - new position saved');
           }
-          saveTrendlines();
-          drawTrendlinesOnChart();
-          // Update handles to new position
-          updateLineHandles();
-          log('✅ Trendline resized - new position saved');
+        } else {
+          log('⚠️ Drag position out of bounds - trendline not moved');
         }
-      } else {
-        log('⚠️ Drag position out of bounds - trendline not moved');
+        
+      } else if (dragState.lineType === 'level') {
+        // Handle horizontal level drag (vertical movement only)
+        const newPrice = candleSeries.coordinateToPrice(newY);
+        
+        if (newPrice !== null && !isNaN(newPrice)) {
+          const levels = getLevelsForSymbol(currentSymbol);
+          const levelIndex = levels.findIndex(l => l.id === selectedLine.data.id);
+          if (levelIndex >= 0) {
+            levels[levelIndex].price = newPrice;
+            selectedLine.data.price = newPrice;
+            saveLevels();
+            drawLevelsOnChart();
+            updateLineHandles();
+            log(`✅ Level moved to ${newPrice.toFixed(2)} - new position saved`);
+          }
+        } else {
+          log('⚠️ Drag position out of bounds - level not moved');
+        }
       }
     }
     
     // Reset drag state and cursor
     if (dragState.handleElement && dragState.handleElement.parentNode) {
-      dragState.handleElement.style.cursor = 'grab';
+      dragState.handleElement.style.cursor = dragState.lineType === 'level' ? 'ns-resize' : 'grab';
     }
-    dragState = { isDragging: false, handleElement: null, isStart: false };
+    dragState = { isDragging: false, handleElement: null, isStart: false, lineType: null };
   });
   
   function clearLineHandles() { 
     // Reset cursor if actively dragging
     if (dragState.handleElement) {
-      dragState.handleElement.style.cursor = 'grab';
+      dragState.handleElement.style.cursor = dragState.lineType === 'level' ? 'ns-resize' : 'grab';
     }
     
     lineHandles.forEach(h=>h.remove()); 
     lineHandles=[]; 
     
     // Completely reset drag state
-    dragState = { isDragging: false, handleElement: null, isStart: false };
+    dragState = { isDragging: false, handleElement: null, isStart: false, lineType: null };
   }
   
   // Track chart viewport changes to keep handles synchronized
