@@ -266,6 +266,7 @@
   // Drag states for line interaction
   let levelDragState = { isDragging: false, draggedLevel: null, startY: null };
   let trendlineDragState = { isDragging: false, draggedTrendline: null, startX: null, startY: null, offsetTime: null, offsetPrice: null };
+  let endpointDragState = { isDragging: false, draggedTrendline: null, endpoint: null }; // 'start' or 'end'
 
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
@@ -1184,6 +1185,39 @@
         }
       }
       
+      // Handle endpoint resizing for trendlines  
+      if (endpointDragState.isDragging && endpointDragState.draggedTrendline) {
+        const rect = chartContainer.getBoundingClientRect();
+        const newX = event.clientX - rect.left;
+        const newY = event.clientY - rect.top;
+        const newTime = chart.timeScale().coordinateToTime(newX);
+        const newPrice = candleSeries.coordinateToPrice(newY);
+        
+        if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
+          const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+          const trendlineIndex = symbolTrendlines.findIndex(t => t.id === endpointDragState.draggedTrendline.id);
+          
+          if (trendlineIndex >= 0) {
+            if (endpointDragState.endpoint === 'start') {
+              symbolTrendlines[trendlineIndex].startTime = newTime;
+              symbolTrendlines[trendlineIndex].startPrice = newPrice;
+            } else if (endpointDragState.endpoint === 'end') {
+              symbolTrendlines[trendlineIndex].endTime = newTime;
+              symbolTrendlines[trendlineIndex].endPrice = newPrice;
+            }
+            
+            // Real-time visual update
+            try {
+              saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
+              drawTrendlinesOnChart();
+              updateLineHandles();
+            } catch (error) {
+              console.warn('[EOD] Error during endpoint drag:', error);
+            }
+          }
+        }
+      }
+      
       // Handle trendline dragging for moving entire lines
       if (trendlineDragState.isDragging && trendlineDragState.draggedTrendline) {
         const rect = chartContainer.getBoundingClientRect();
@@ -1232,9 +1266,19 @@
         const clickX = event.clientX - rect.left;
         const clickY = event.clientY - rect.top;
         
-        // Check if clicking on the selected line
+        // Check if clicking on the selected line or its endpoints
         const clickedLine = findLineNearClick(clickX, clickY);
-        if (clickedLine && clickedLine.data.id === selectedLine.data.id) {
+        const endpointHit = selectedLine.type === 'trendline' ? checkEndpointHit(clickX, clickY, selectedLine.data) : null;
+        
+        if (endpointHit) {
+          // Endpoint resizing for trendlines
+          endpointDragState.isDragging = true;
+          endpointDragState.draggedTrendline = selectedLine.data;
+          endpointDragState.endpoint = endpointHit; // 'start' or 'end'
+          chartContainer.style.cursor = 'nw-resize';
+          event.preventDefault();
+          event.stopPropagation();
+        } else if (clickedLine && clickedLine.data.id === selectedLine.data.id) {
           if (selectedLine.type === 'level') {
             levelDragState.isDragging = true;
             levelDragState.draggedLevel = clickedLine;
@@ -1308,7 +1352,53 @@
         chartContainer.style.cursor = '';
         log(`✅ Trendline resized - new position saved`);
       }
+      
+      if (endpointDragState.isDragging) {
+        const rect = chartContainer.getBoundingClientRect();
+        const newX = event.clientX - rect.left;
+        const newY = event.clientY - rect.top;
+        const newTime = chart.timeScale().coordinateToTime(newX);
+        const newPrice = candleSeries.coordinateToPrice(newY);
+        
+        if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
+          log(`✅ Trendline endpoint resized - angle adjusted`);
+        } else {
+          log('⚠️ Endpoint drag position out of bounds');
+        }
+        
+        endpointDragState.isDragging = false;
+        endpointDragState.draggedTrendline = null;
+        endpointDragState.endpoint = null;
+        chartContainer.style.cursor = '';
+      }
     });
+  }
+
+  // Check if click is near a trendline endpoint for resizing
+  function checkEndpointHit(clickX, clickY, trendlineData, tolerance = 12) {
+    if (!trendlineData) return null;
+    
+    // Get coordinates of start and end points
+    const startX = chart.timeScale().timeToCoordinate(trendlineData.startTime);
+    const startY = candleSeries.priceToCoordinate(trendlineData.startPrice);
+    const endX = chart.timeScale().timeToCoordinate(trendlineData.endTime);
+    const endY = candleSeries.priceToCoordinate(trendlineData.endPrice);
+    
+    if (startX !== null && startY !== null && endX !== null && endY !== null) {
+      // Check distance to start point
+      const startDistance = Math.sqrt(Math.pow(clickX - startX, 2) + Math.pow(clickY - startY, 2));
+      if (startDistance <= tolerance) {
+        return 'start';
+      }
+      
+      // Check distance to end point
+      const endDistance = Math.sqrt(Math.pow(clickX - endX, 2) + Math.pow(clickY - endY, 2));
+      if (endDistance <= tolerance) {
+        return 'end';
+      }
+    }
+    
+    return null;
   }
 
   // Line detection for selection (approximate hit testing)
