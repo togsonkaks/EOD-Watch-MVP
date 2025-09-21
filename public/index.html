@@ -5,7 +5,7 @@
   <title>EOD Watch — Pro UI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- TradingView Lightweight Charts -->
-  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     :root{--bg:#0e1a24;--panel:#0f1b2b;--border:#1f2937;--text:#cbd5e1;--muted:#94a3b8;--accent:#3b82f6;--good:#4ade80;--bad:#ef4444;--warn:#f59e0b}
     *{box-sizing:border-box}
@@ -100,6 +100,8 @@
 
 <script>
 (() => {
+  console.log('[EOD] JavaScript is executing - script loaded successfully');
+  
   // --- Config ---
   const API = ''; // same-origin Express proxy. If serving UI elsewhere, set 'http://localhost:3000'
   const DEFAULT_WATCHLIST = ['SPY','QQQ','AAPL','MSFT','NVDA','TSLA','META','AMD','GOOGL','IWM'];
@@ -141,6 +143,11 @@
     const chartContainer = $('#chart');
     if (!chartContainer) {
       console.error('[EOD] Chart container not found!');
+      return false;
+    }
+    
+    if (typeof LightweightCharts === 'undefined') {
+      console.error('[EOD] LightweightCharts library not loaded!');
       return false;
     }
     
@@ -391,6 +398,11 @@
 
   // --- TF management ---
   function applyTF(tf, firstLoad=false){
+    if (!chart || !candle) {
+      console.error('[EOD] Chart not initialized - cannot apply timeframe');
+      return;
+    }
+    
     currentTF = tf;
     let bars = dailyBars;
     if (tf==='1W') bars = resampleWeekly(dailyBars);
@@ -402,10 +414,10 @@
 
     // indicators
     let emaArr = [];
-    if (emaOn){
+    if (emaOn && emaSeries){
       emaArr = emaFromBars(bars,200);
       emaSeries.setData(emaArr);
-    } else {
+    } else if (emaSeries) {
       emaSeries.setData([]);
     }
 
@@ -415,7 +427,9 @@
     drawLevels(); refreshLevelsPanel();
     drawTrends(); refreshTrendsPanel();
 
-    chart.timeScale().fitContent();
+    if (chart && chart.timeScale) {
+      chart.timeScale().fitContent();
+    }
 
     // chips
     renderChips(evaluateCrosses(bars, emaArr));
@@ -573,37 +587,70 @@
     $('#toggleEMA').onclick = () => {
       emaOn = !emaOn;
       $('#toggleEMA').classList.toggle('active', emaOn);
-      if (emaOn) {
+      if (emaOn && emaSeries) {
         const ema = emaFromBars(tfBars);
         emaSeries.setData(ema);
         log('✅ EMA200 enabled');
-      } else {
+      } else if (emaSeries) {
         emaSeries.setData([]);
         log('❌ EMA200 disabled');
+      } else {
+        log('❌ Chart not initialized - cannot toggle EMA');
       }
     };
   }
 
   // --- Boot ---
   function initialize() {
-    fetch(`${API}/healthz`).then(r=>r.ok?log('Backend OK'):log('Backend NOT OK')).catch(e=>log('Backend error: '+e.message));
+    console.log('[EOD] Starting initialize function');
     
-    if (!initChart()) {
-      log('❌ Chart initialization failed');
-      return;
+    // Basic environment checks
+    console.log('[EOD] LightweightCharts available:', typeof LightweightCharts !== 'undefined');
+    console.log('[EOD] Chart container exists:', !!$('#chart'));
+    console.log('[EOD] Log element exists:', !!$('#log'));
+    
+    try {
+      log('🔄 Starting initialization...');
+      fetch(`${API}/healthz`).then(r=>r.ok?log('Backend OK'):log('Backend NOT OK')).catch(e=>log('Backend error: '+e.message));
+      
+      log('📊 Initializing chart...');
+      const chartResult = initChart();
+      log(`📊 Chart init result: ${chartResult}`);
+      
+      if (!chartResult) {
+        log('❌ Chart initialization failed - stopping');
+        return;
+      }
+      
+      log('🎛️ Setting up event handlers...');
+      setupEventHandlers();
+      
+      log('📋 Building board...');
+      buildBoard();
+      
+      log('📈 Loading default symbol...');
+      loadSymbol('AAPL');
+      
+      log('🚀 EOD Watch initialized');
+    } catch (error) {
+      console.error('[EOD] Error in initialize:', error);
+      log('❌ Initialization failed: ' + error.message);
     }
-    
-    setupEventHandlers();
-    buildBoard();
-    loadSymbol('AAPL');
-    log('🚀 EOD Watch initialized');
   }
   
   // Wait for DOM to be ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
-  } else {
-    initialize();
+  console.log('[EOD] Document ready state:', document.readyState);
+  
+  try {
+    if (document.readyState === 'loading') {
+      console.log('[EOD] Adding DOMContentLoaded listener');
+      document.addEventListener('DOMContentLoaded', initialize);
+    } else {
+      console.log('[EOD] DOM already ready, calling initialize directly');
+      initialize();
+    }
+  } catch (error) {
+    console.error('[EOD] Error in startup:', error);
   }
 })();
 </script>

@@ -16,7 +16,14 @@ if (!TIINGO_TOKEN) {
 }
 
 app.use(cors());
-app.use(express.static(path.join(__dirname, 'public')));
+// Disable cache for development to ensure updates are picked up
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: function (res, path) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+}));
 
 // Health
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
