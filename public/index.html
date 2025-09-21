@@ -271,9 +271,6 @@
   let levelDragState = { isDragging: false, draggedLevel: null, startY: null };
   let trendlineDragState = { isDragging: false, draggedTrendline: null, startX: null, startY: null, offsetTime: null, offsetPrice: null };
   let endpointDragState = { isDragging: false, draggedTrendline: null, endpoint: null }; // 'start' or 'end'
-  // Throttling for smooth drag performance
-  let lastUpdateTime = 0;
-  const UPDATE_THROTTLE_MS = 16; // ~60fps max update rate
 
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
@@ -1200,11 +1197,6 @@
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
-          // Throttle updates for smoothness
-          const now = Date.now();
-          if (now - lastUpdateTime < UPDATE_THROTTLE_MS) return;
-          lastUpdateTime = now;
-          
           // Update the level price in real-time
           const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
           const levelIndex = symbolLevels.findIndex(l => l.id === levelDragState.draggedLevel.data.id);
@@ -1212,15 +1204,13 @@
             symbolLevels[levelIndex].price = newPrice;
             levelDragState.draggedLevel.data.price = newPrice;
             
-            // Throttled visual update for smoothness
-            requestAnimationFrame(() => {
-              try {
-                drawLevelsOnChart();
-                updateLineHandles();
-              } catch (error) {
-                console.warn('[EOD] Error during level line drag:', error);
-              }
-            });
+            // Real-time visual update for immediate responsiveness
+            try {
+              drawLevelsOnChart();
+              updateLineHandles();
+            } catch (error) {
+              console.warn('[EOD] Error during level line drag:', error);
+            }
           }
         }
       }
@@ -1234,11 +1224,6 @@
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
-          // Throttle updates for smoothness
-          const now = Date.now();
-          if (now - lastUpdateTime < UPDATE_THROTTLE_MS) return;
-          lastUpdateTime = now;
-          
           const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
           const trendlineIndex = symbolTrendlines.findIndex(t => t.id === endpointDragState.draggedTrendline.id);
           
@@ -1251,15 +1236,13 @@
               symbolTrendlines[trendlineIndex].endPrice = newPrice;
             }
             
-            // Throttled visual update for smoothness
-            requestAnimationFrame(() => {
-              try {
-                drawTrendlinesOnChart();
-                updateLineHandles();
-              } catch (error) {
-                console.warn('[EOD] Error during endpoint drag:', error);
-              }
-            });
+            // Real-time visual update for immediate responsiveness
+            try {
+              drawTrendlinesOnChart();
+              updateLineHandles();
+            } catch (error) {
+              console.warn('[EOD] Error during endpoint drag:', error);
+            }
           }
         }
       }
@@ -1273,11 +1256,6 @@
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newTime !== null && newPrice !== null && !isNaN(newPrice)) {
-          // Throttle updates for smoothness
-          const now = Date.now();
-          if (now - lastUpdateTime < UPDATE_THROTTLE_MS) return;
-          lastUpdateTime = now;
-          
           // Calculate the offset from the original drag start position
           const timeDelta = newTime - trendlineDragState.offsetTime;
           const priceDelta = newPrice - trendlineDragState.offsetPrice;
@@ -1297,15 +1275,13 @@
             // Update the draggedTrendline reference
             trendlineDragState.draggedTrendline.data = symbolTrendlines[trendlineIndex];
             
-            // Throttled visual update for smoothness
-            requestAnimationFrame(() => {
-              try {
-                drawTrendlinesOnChart();
-                updateLineHandles();
-              } catch (error) {
-                console.warn('[EOD] Error during trendline drag:', error);
-              }
-            });
+            // Real-time visual update for immediate responsiveness
+            try {
+              drawTrendlinesOnChart();
+              updateLineHandles();
+            } catch (error) {
+              console.warn('[EOD] Error during trendline drag:', error);
+            }
           }
         }
       }
