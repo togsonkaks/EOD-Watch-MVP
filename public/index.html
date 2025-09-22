@@ -2256,8 +2256,17 @@
   });
 
   // ---- Chart init
-  chart = LightweightCharts.createChart(document.getElementById('chart'), {
-    autoSize: true,
+  const chartContainer = document.getElementById('chart');
+  console.log('[EOD] 📊 Chart container:', chartContainer, 'Dimensions:', chartContainer?.offsetWidth, 'x', chartContainer?.offsetHeight);
+  
+  if (!chartContainer) {
+    console.error('[EOD] ❌ Chart container not found!');
+    return;
+  }
+  
+  chart = LightweightCharts.createChart(chartContainer, {
+    width: chartContainer.offsetWidth,
+    height: 520,
     layout: { background: { color: '#0e1a24' }, textColor: '#cbd5e1' },
     grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
     rightPriceScale: { 
@@ -2290,7 +2299,15 @@
       axisDoubleClickReset: false  // Disable double-click auto-reset
     }
   });
-  candleSeries = chart.addCandlestickSeries();
+  candleSeries = chart.addCandlestickSeries({
+    upColor: '#4ade80',        // Green for up candles
+    downColor: '#ef4444',      // Red for down candles
+    borderVisible: true,
+    wickUpColor: '#4ade80',    // Green wicks for up candles  
+    wickDownColor: '#ef4444',  // Red wicks for down candles
+    borderUpColor: '#4ade80',
+    borderDownColor: '#ef4444'
+  });
   // indicators
   const emaSeries = chart.addLineSeries({ color: '#60a5fa', lineWidth: 2 });
   const bbUpperSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
