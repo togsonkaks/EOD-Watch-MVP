@@ -653,7 +653,8 @@
     const price = candleSeries.coordinateToPrice(py);
     const time = chart.timeScale().coordinateToTime(px);
     
-    if (!price || !time || !isFinite(price) || !isFinite(time)) {
+    if (!price || !time || !isFinite(price) || !isFinite(time) || 
+        price === null || time === null) {
       console.log('[EOD] ❌ Invalid coordinates:', { price, time });
       return null;
     }
@@ -2916,7 +2917,9 @@
         const price = candleSeries.coordinateToPrice(param.point.y);
         const time = chart.timeScale().coordinateToTime(param.point.x);
         
-        if (price !== null && !isNaN(price) && time !== null && time !== undefined) {
+        // CRITICAL FIX: Stricter validation to prevent chart crashes
+        if (price !== null && !isNaN(price) && isFinite(price) && 
+            time !== null && time !== undefined && isFinite(time)) {
           // Check if clicking on existing line for alert setup (when not in drawing mode)
           if (!drawingMode) {
             const clickedLine = findLineNearClick(param.point.x, param.point.y);
@@ -2963,6 +2966,9 @@
               console.log('[EOD] ✅ Drawing mode disabled after trendline completion - drawingMode now:', drawingMode);
             }
           }
+        } else {
+          // Log invalid coordinates without causing errors
+          console.log('[EOD] ⚠️ Invalid coordinates for drawing - price:', price, 'time:', time);
         }
       }
     });
@@ -2988,7 +2994,8 @@
           const price = candleSeries.coordinateToPrice(point.y);
           const time = chart.timeScale().coordinateToTime(point.x);
           
-          if (price !== null && !isNaN(price) && time !== null && time !== undefined) {
+          if (price !== null && !isNaN(price) && isFinite(price) && 
+              time !== null && time !== undefined && isFinite(time)) {
             updateTrendlinePreview(time, price);
           }
         }, 16); // ~60fps throttling
