@@ -1965,7 +1965,7 @@
   }
 
   // Detect clicks on indicators (EMA, Bollinger Bands)
-  function detectIndicatorClick(clickX, clickY, tolerance = 8) {
+  function detectIndicatorClick(clickX, clickY, tolerance = 200) {
     if (!tfBars || tfBars.length === 0) {
       console.log('[DEBUG] No tfBars available for indicator click detection');
       return null;
