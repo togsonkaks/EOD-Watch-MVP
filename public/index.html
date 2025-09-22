@@ -2244,12 +2244,16 @@
     e.stopImmediatePropagation();
     e.preventDefault();
     
+    console.log('[EOD] 🖱️ handleLineSelection - button:', e.button, 'drawing:', drawing.type, 'index:', drawing.index);
+    
     if (e.button === 2) { // Right-click
+      console.log('[EOD] 🖱️ Right-click detected on', drawing.type);
       handleRightClickLine(e, drawing);
       return;
     }
     
     if (e.button === 0) { // Left-click
+      console.log('[EOD] 🖱️ Left-click detected on', drawing.type);
       selectedDrawing = drawing;
       console.log('[EOD] ✅ Selected', drawing.type, 'at index', drawing.index);
       renderOverlay(); // Re-render to show selection
@@ -2290,36 +2294,83 @@
   }
   
   function showDrawingContextMenu(e, drawing, targetPrice) {
-    // Use existing context menu system properly
+    console.log('[EOD] 🎯 showDrawingContextMenu called for:', drawing.type, 'price:', targetPrice);
+    
     const drawingName = drawing.type === 'level' ? 
       `Level ${targetPrice.toFixed(2)}` : 
       `Trendline ${targetPrice.toFixed(2)}`;
     
-    // Create drawing-specific menu items
-    const menuItems = [
-      { 
-        icon: '🔔', 
-        label: `Set Alert for ${drawingName}`, 
-        action: () => openDrawingAlert(drawing, targetPrice) 
-      },
-      { separator: true },
-      { 
-        icon: '🗑️', 
-        label: `Delete ${drawing.type}`, 
-        action: () => deleteDrawing(drawing) 
-      }
-    ];
+    // Create simple dedicated context menu for drawings
+    const contextMenu = $('#contextMenu');
+    if (!contextMenu) {
+      console.error('[EOD] ❌ Context menu element not found');
+      return;
+    }
     
-    // Use existing showContextMenu function
-    showContextMenu(e.clientX, e.clientY, `drawing_${drawing.type}`, { 
-      ...drawing, 
-      targetPrice,
-      drawingName,
-      menuItems 
-    });
+    // Clear and populate menu
+    contextMenu.innerHTML = `
+      <div class="context-menu-item" onclick="setAlertForDrawing('${drawing.type}', ${drawing.index}, ${targetPrice})">
+        🔔 Set Alert for ${drawingName}
+      </div>
+      <div class="context-menu-separator"></div>
+      <div class="context-menu-item" onclick="deleteDrawingAtIndex('${drawing.type}', ${drawing.index})">
+        🗑️ Delete ${drawing.type}
+      </div>
+    `;
+    
+    // Position and show menu
+    contextMenu.style.left = e.clientX + 'px';
+    contextMenu.style.top = e.clientY + 'px';
+    contextMenu.style.display = 'block';
+    
+    // Hide menu when clicking elsewhere
+    setTimeout(() => {
+      document.addEventListener('click', hideDrawingContextMenu, { once: true });
+    }, 10);
     
     console.log('[EOD] 📋 Context menu shown for', drawingName);
   }
+  
+  function hideDrawingContextMenu() {
+    const contextMenu = $('#contextMenu');
+    if (contextMenu) {
+      contextMenu.style.display = 'none';
+    }
+  }
+  
+  // Global functions for context menu actions
+  window.setAlertForDrawing = function(type, index, price) {
+    console.log('[EOD] 🔔 Set alert for', type, 'at index', index, 'price', price);
+    hideDrawingContextMenu();
+    
+    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
+    const drawing = type === 'level' ? drawings.levels[index] : drawings.trendlines[index];
+    
+    if (drawing) {
+      openDrawingAlert({ type, index, drawing }, price);
+    }
+  };
+  
+  window.deleteDrawingAtIndex = function(type, index) {
+    console.log('[EOD] 🗑️ Delete', type, 'at index', index);
+    hideDrawingContextMenu();
+    
+    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
+    
+    if (type === 'level' && drawings.levels[index]) {
+      drawings.levels.splice(index, 1);
+    } else if (type === 'trendline' && drawings.trendlines[index]) {
+      drawings.trendlines.splice(index, 1);
+    }
+    
+    // Clear selection if this drawing was selected
+    if (selectedDrawing && selectedDrawing.index === index && selectedDrawing.type === type) {
+      selectedDrawing = null;
+    }
+    
+    renderOverlay();
+    console.log('[EOD] 🗑️ Deleted', type, 'at index', index);
+  };
   
   function openDrawingAlert(drawing, targetPrice) {
     // Integrate with existing alert dialog
