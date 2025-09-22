@@ -446,7 +446,7 @@
         <div>Loading chart data...</div>
       </div>
       <!-- ISOLATED DRAWING OVERLAY - Completely independent from chart series -->
-      <canvas id="drawing-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 100; pointer-events: none;"></canvas>
+      <canvas id="drawing-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 100; pointer-events: none;"></canvas>
     </section>
 
     <!-- side panel -->
@@ -2019,6 +2019,7 @@
     }
     
     overlayCanvas.addEventListener('pointerdown', (e) => {
+      console.log('[EOD] 🎯 Overlay canvas clicked! Drawing mode:', overlayState.drawingMode, 'Tool:', overlayState.drawingTool);
       if (!overlayState.drawingMode) return;
       
       e.stopImmediatePropagation();
@@ -2123,6 +2124,21 @@
 
   function priceToChart(price) {
     return candleSeries.priceToCoordinate(price);
+  }
+
+  // ===== OVERLAY DRAWING FUNCTIONS =====
+  function overlayAddLevel(price) {
+    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
+    drawings.levels.push({ price });
+    renderOverlay();
+    console.log('[EOD] ✅ Overlay level added at', price.toFixed(2));
+  }
+
+  function overlayAddTrendline(x1, y1, x2, y2) {
+    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);  
+    drawings.trendlines.push({ x1, y1, x2, y2 });
+    renderOverlay();
+    console.log('[EOD] ✅ Overlay trendline added');
   }
 
   // ===== OVERLAY RENDERING SYSTEM =====
