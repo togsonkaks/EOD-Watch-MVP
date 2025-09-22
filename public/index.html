@@ -3772,6 +3772,20 @@
       // Store tfBars for signal evaluation
       tfBars = chartBars;
       
+      // Set reasonable initial viewport (last 6-8 months instead of entire history)
+      const totalBars = bars.length;
+      const barsToShow = Math.min(200, totalBars); // Show last 200 bars or all if less than 200
+      const startIndex = Math.max(0, totalBars - barsToShow);
+      const endIndex = totalBars - 1;
+      
+      // Set the visible logical range to show recent data only
+      chart.timeScale().setVisibleLogicalRange({
+        from: startIndex,
+        to: endIndex
+      });
+      
+      console.log(`[EOD] 📊 Set initial viewport: showing bars ${startIndex} to ${endIndex} (${barsToShow} bars)`);
+      
       // Evaluate signals for the loaded data
       evaluateCurrentSignals();
       
