@@ -2089,15 +2089,34 @@
   }
 
   function chartToLogical(x) {
-    return chart.timeScale().coordinateToLogical(x);
+    try {
+      const logical = chart.timeScale().coordinateToLogical(x);
+      console.log('[EOD] 🎯 Coordinate conversion - x:', x, 'logical:', logical);
+      return logical;
+    } catch (e) {
+      console.error('[EOD] ❌ chartToLogical error:', e);
+      return null;
+    }
   }
 
   function logicalToChart(logical) {
-    return chart.timeScale().logicalToCoordinate(logical);
+    try {
+      return chart.timeScale().logicalToCoordinate(logical);
+    } catch (e) {
+      console.error('[EOD] ❌ logicalToChart error:', e);
+      return null;
+    }
   }
 
   function chartToPrice(y) {
-    return candleSeries.coordinateToPrice(y);
+    try {
+      const price = candleSeries.coordinateToPrice(y);
+      console.log('[EOD] 🎯 Coordinate conversion - y:', y, 'price:', price);
+      return price;
+    } catch (e) {
+      console.error('[EOD] ❌ chartToPrice error:', e);
+      return null;
+    }
   }
 
   function priceToChart(price) {
