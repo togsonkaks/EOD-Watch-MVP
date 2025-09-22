@@ -2283,8 +2283,17 @@
       return false;
     }
     
+    // Preserve the drawing overlay canvas before clearing
+    const existingCanvas = document.getElementById('drawing-overlay');
+    
     // Clear any existing content
     chartContainer.innerHTML = '';
+    
+    // Restore the canvas after clearing
+    if (existingCanvas) {
+      chartContainer.appendChild(existingCanvas);
+      console.log('[EOD] ✅ Drawing overlay canvas preserved');
+    }
     
     try {
       chart = LightweightCharts.createChart(chartContainer, {
