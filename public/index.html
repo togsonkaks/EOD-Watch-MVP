@@ -2942,7 +2942,7 @@
     // Bootstrap 200 seed minutes so EMA/BB have data
     testBars = [baseFrom];
     for (let i=0;i<220;i++) testBars.push(genNextMinute(testBars.at(-1), 18));
-    candle.setData(testBars);
+    candleSeries.setData(testBars);
     emaSeries.setData(emaFromBars(testBars, 200));
     const bb = bbFromBars(testBars, 20, 2);
     bbUpperSeries.setData(bb.upper);
@@ -2956,7 +2956,7 @@
   function testTick() {
     const next = genNextMinute(testBars.at(-1), 22);
     testBars.push(next);
-    candle.update(next);
+    candleSeries.update(next);
 
     // Update indicators incrementally
     const emaArr = emaFromBars(testBars, 200);     // fine for test; optimize later if needed
