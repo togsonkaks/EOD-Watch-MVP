@@ -2255,18 +2255,23 @@
     });
   });
 
-  // ---- Chart init
-  const chartContainer = document.getElementById('chart');
-  console.log('[EOD] 📊 Chart container:', chartContainer, 'Dimensions:', chartContainer?.offsetWidth, 'x', chartContainer?.offsetHeight);
-  
-  if (!chartContainer) {
-    console.error('[EOD] ❌ Chart container not found!');
-    return;
-  }
-  
-  chart = LightweightCharts.createChart(chartContainer, {
-    width: chartContainer.offsetWidth,
-    height: 520,
+  // ---- Chart init  
+  function initializeChart() {
+    const chartContainer = document.getElementById('chart');
+    console.log('[EOD] 📊 Chart container:', chartContainer, 'Dimensions:', chartContainer?.offsetWidth, 'x', chartContainer?.offsetHeight);
+    
+    if (!chartContainer) {
+      console.error('[EOD] ❌ Chart container not found!');
+      return false;
+    }
+    
+    // Clear any existing content
+    chartContainer.innerHTML = '';
+    
+    try {
+      chart = LightweightCharts.createChart(chartContainer, {
+        width: chartContainer.offsetWidth,
+        height: 520,
     layout: { background: { color: '#0e1a24' }, textColor: '#cbd5e1' },
     grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
     rightPriceScale: { 
@@ -2299,6 +2304,9 @@
       axisDoubleClickReset: false  // Disable double-click auto-reset
     }
   });
+  
+  console.log('[EOD] ✅ Chart object created:', chart);
+  
   candleSeries = chart.addCandlestickSeries({
     upColor: '#4ade80',        // Green for up candles
     downColor: '#ef4444',      // Red for down candles
@@ -2313,6 +2321,34 @@
   const bbUpperSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
   const bbMiddleSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1, lineStyle: 2 });
   const bbLowerSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
+
+  console.log('[EOD] ✅ All series created');
+  
+  // Test if chart is actually working by adding test data immediately
+  const testData = [
+    { time: '2023-01-01', open: 100, high: 105, low: 95, close: 102 },
+    { time: '2023-01-02', open: 102, high: 108, low: 100, close: 106 },
+    { time: '2023-01-03', open: 106, high: 110, low: 104, close: 108 }
+  ];
+  candleSeries.setData(testData);
+  console.log('[EOD] 🧪 Test data set to candleSeries');
+  
+  return true;
+  } catch (error) {
+    console.error('[EOD] ❌ Chart initialization failed:', error);
+    return false;
+  }
+  }
+  
+  // Initialize chart immediately when DOM is ready
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('[EOD] 🚀 DOM ready - initializing chart');
+    if (initializeChart()) {
+      console.log('[EOD] ✅ Chart initialized successfully');
+    } else {
+      console.error('[EOD] ❌ Chart initialization failed');
+    }
+  });
 
   // ===== INITIALIZE OVERLAY SYSTEM AFTER CHART AND SERIES CREATION =====
   setTimeout(() => {
