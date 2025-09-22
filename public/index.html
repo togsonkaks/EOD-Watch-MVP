@@ -612,7 +612,11 @@
     trendlineStart: null,
     selectedDrawing: null,
     isDragging: false,
-    dragOffset: { x: 0, y: 0 }
+    dragOffset: { x: 0, y: 0 },
+    dragTarget: null,
+    dragStart: null,
+    dragMode: null, // 'move', 'resize-start', 'resize-end'
+    originalTrendline: null
   };
   
   // Legacy drawing storage (will be migrated)
@@ -1984,6 +1988,10 @@
   // ===== INITIALIZE OVERLAY SYSTEM AFTER CHART AND SERIES CREATION =====
   setTimeout(() => {
     if (typeof initializeDrawingOverlay === 'function') {
+      // Load stored drawings first
+      loadOverlayDrawingsFromStorage();
+      
+      // Initialize overlay system
       initializeDrawingOverlay();
       setupOverlayEventHandling();
       console.log('[EOD] 🎯 Overlay system initialized after chart setup');
@@ -2106,7 +2114,178 @@
     // Add hover detection for interactive line selection
     setupHoverDetection();
     
+    // Add drag handlers
+    setupOverlayDragHandlers();
+    
     console.log('[EOD] ✅ Overlay event handling setup');
+  }
+
+  // ===== OVERLAY DRAG HANDLERS =====
+  function setupOverlayDragHandlers() {
+    
+    // Mouse move handler for dragging
+    overlayCanvas.addEventListener('pointermove', (e) => {
+      if (!overlayState.dragTarget) return;
+      
+      const rect = overlayCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      // Calculate movement since drag start
+      const deltaX = x - overlayState.dragStart.x;
+      const deltaY = y - overlayState.dragStart.y;
+      const totalMovement = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+      
+      // Activate drag mode if movement exceeds threshold
+      if (!overlayState.isDragging && totalMovement > 5) {
+        overlayState.isDragging = true;
+        console.log('[EOD] 🎯 Drag started for', overlayState.dragTarget.type, 'mode:', overlayState.dragMode);
+        
+        // Disable chart interactions during drag
+        chart.applyOptions({ handleScroll: false, handleScale: false });
+      }
+      
+      if (overlayState.isDragging) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        
+        // Update line position based on drag mode
+        updateLinePositionDuringDrag(x, y);
+        renderOverlay();
+      }
+    });
+    
+    // Mouse up handler to complete drag
+    overlayCanvas.addEventListener('pointerup', (e) => {
+      if (overlayState.isDragging) {
+        console.log('[EOD] 🎯 Drag completed for', overlayState.dragTarget.type);
+        
+        // Save changes to storage
+        saveDrawingsAfterDrag();
+        
+        // Re-enable chart interactions
+        chart.applyOptions({ handleScroll: true, handleScale: true });
+      }
+      
+      // Reset drag state
+      overlayState.isDragging = false;
+      overlayState.dragTarget = null;
+      overlayState.dragStart = null;
+      overlayState.dragOffset = null;
+      overlayState.dragMode = null;
+      overlayCanvas.style.cursor = hoveredDrawing ? 'pointer' : 'default';
+    });
+    
+    // Handle pointer leave to cleanup drag state
+    overlayCanvas.addEventListener('pointerleave', (e) => {
+      if (overlayState.isDragging) {
+        // Complete the drag on leave
+        saveDrawingsAfterDrag();
+        chart.applyOptions({ handleScroll: true, handleScale: true });
+      }
+      
+      // Reset drag state
+      overlayState.isDragging = false;
+      overlayState.dragTarget = null;
+      overlayState.dragStart = null;
+      overlayState.dragOffset = null;
+      overlayState.dragMode = null;
+      overlayCanvas.style.cursor = 'default';
+    });
+  }
+
+  // ===== DRAG POSITION UPDATING FUNCTIONS =====
+  function updateLinePositionDuringDrag(x, y) {
+    if (!overlayState.dragTarget || !overlayState.isDragging) return;
+    
+    const drawing = overlayState.dragTarget.drawing;
+    const index = overlayState.dragTarget.index;
+    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
+    
+    if (overlayState.dragTarget.type === 'level') {
+      // Level: Only allow vertical movement (price changes)
+      const newPrice = chartToPrice(y);
+      if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
+        drawings.levels[index].price = newPrice;
+        console.log('[EOD] 🎯 Level dragged to price:', newPrice.toFixed(2));
+      }
+    } else if (overlayState.dragTarget.type === 'trendline') {
+      // Trendline: Handle different drag modes
+      const logical = chartToLogical(x);
+      const price = chartToPrice(y);
+      
+      if (logical !== null && price !== null && !isNaN(logical) && !isNaN(price)) {
+        if (overlayState.dragMode === 'move') {
+          // Move entire trendline
+          const deltaLogical = logical - chartToLogical(overlayState.dragStart.x);
+          const deltaPrice = price - chartToPrice(overlayState.dragStart.y);
+          
+          if (!isNaN(deltaLogical) && !isNaN(deltaPrice)) {
+            // Store original positions if not already stored
+            if (!overlayState.originalTrendline) {
+              overlayState.originalTrendline = {
+                x1Logical: drawing.x1Logical,
+                y1Price: drawing.y1Price,
+                x2Logical: drawing.x2Logical,
+                y2Price: drawing.y2Price
+              };
+            }
+            
+            drawings.trendlines[index].x1Logical = overlayState.originalTrendline.x1Logical + deltaLogical;
+            drawings.trendlines[index].y1Price = overlayState.originalTrendline.y1Price + deltaPrice;
+            drawings.trendlines[index].x2Logical = overlayState.originalTrendline.x2Logical + deltaLogical;
+            drawings.trendlines[index].y2Price = overlayState.originalTrendline.y2Price + deltaPrice;
+            
+            console.log('[EOD] 🎯 Trendline moved by delta:', deltaLogical.toFixed(1), deltaPrice.toFixed(2));
+          }
+        } else if (overlayState.dragMode === 'resize-start') {
+          // Resize from start point
+          drawings.trendlines[index].x1Logical = logical;
+          drawings.trendlines[index].y1Price = price;
+          console.log('[EOD] 🎯 Trendline start point moved to:', logical.toFixed(1), price.toFixed(2));
+        } else if (overlayState.dragMode === 'resize-end') {
+          // Resize from end point
+          drawings.trendlines[index].x2Logical = logical;
+          drawings.trendlines[index].y2Price = price;
+          console.log('[EOD] 🎯 Trendline end point moved to:', logical.toFixed(1), price.toFixed(2));
+        }
+      }
+    }
+  }
+  
+  function saveDrawingsAfterDrag() {
+    if (!overlayState.dragTarget) return;
+    
+    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
+    const key = getDrawingKey(currentSymbol, currentTimeframe);
+    
+    // Update the stored drawings
+    overlayDrawings[key] = drawings;
+    
+    // Save to localStorage for persistence
+    try {
+      localStorage.setItem('eod-overlay-drawings', JSON.stringify(overlayDrawings));
+      console.log('[EOD] ✅ Drawings saved after drag for', currentSymbol, currentTimeframe);
+    } catch (e) {
+      console.error('[EOD] ❌ Failed to save drawings:', e);
+    }
+    
+    // Clear original trendline position cache
+    overlayState.originalTrendline = null;
+  }
+
+  // ===== OVERLAY STORAGE FUNCTIONS =====
+  function loadOverlayDrawingsFromStorage() {
+    try {
+      const stored = localStorage.getItem('eod-overlay-drawings');
+      if (stored) {
+        overlayDrawings = JSON.parse(stored);
+        console.log('[EOD] ✅ Overlay drawings loaded from storage');
+      }
+    } catch (e) {
+      console.error('[EOD] ❌ Failed to load overlay drawings:', e);
+      overlayDrawings = {};
+    }
   }
 
   // ===== HOVER DETECTION AND HIT TESTING =====
@@ -2119,6 +2298,9 @@
     const chartContainer = document.getElementById('chart');
     
     chartContainer.addEventListener('mousemove', (e) => {
+      // Store mouse event for cursor positioning
+      window.lastMouseEvent = e;
+      
       if (overlayState.drawingMode) return; // Don't interfere with drawing mode
       
       // Get coordinates relative to overlay canvas
@@ -2230,19 +2412,54 @@
   
   function updateHoverFeedback() {
     // SMART POINTER EVENTS: Only intercept when hovering lines or in drawing mode
-    const shouldIntercept = overlayState.drawingMode || hoveredDrawing;
+    const shouldIntercept = overlayState.drawingMode || hoveredDrawing || overlayState.isDragging;
     overlayCanvas.style.pointerEvents = shouldIntercept ? 'auto' : 'none';
     
-    
-    // Update cursor
-    if (hoveredDrawing) {
-      overlayCanvas.style.cursor = 'pointer';
+    // Update cursor based on state
+    if (overlayState.isDragging) {
+      // Keep drag cursor during drag
+      return;
+    } else if (hoveredDrawing) {
+      // Show appropriate cursor for the hovered drawing
+      if (hoveredDrawing.type === 'level') {
+        overlayCanvas.style.cursor = 'ns-resize';
+      } else if (hoveredDrawing.type === 'trendline') {
+        // Check if we're near endpoints for resize cursor
+        const rect = overlayCanvas.getBoundingClientRect();
+        const mouseEvent = window.lastMouseEvent;
+        if (mouseEvent && rect) {
+          const x = mouseEvent.clientX - rect.left;
+          const y = mouseEvent.clientY - rect.top;
+          
+          const drawing = hoveredDrawing.drawing;
+          const x1 = logicalToChart(drawing.x1Logical);
+          const y1 = priceToChart(drawing.y1Price);
+          const x2 = logicalToChart(drawing.x2Logical);
+          const y2 = priceToChart(drawing.y2Price);
+          
+          if (x1 !== null && y1 !== null && x2 !== null && y2 !== null) {
+            const startDist = Math.hypot(x - x1, y - y1);
+            const endDist = Math.hypot(x - x2, y - y2);
+            const resizeThreshold = 12;
+            
+            if (startDist <= resizeThreshold || endDist <= resizeThreshold) {
+              overlayCanvas.style.cursor = 'nw-resize';
+            } else {
+              overlayCanvas.style.cursor = 'move';
+            }
+          } else {
+            overlayCanvas.style.cursor = 'move';
+          }
+        } else {
+          overlayCanvas.style.cursor = 'move';
+        }
+      }
     } else {
       overlayCanvas.style.cursor = overlayState.drawingMode ? 'crosshair' : 'default';
     }
   }
   
-  // ===== LINE SELECTION AND INTERACTION =====
+  // ===== LINE SELECTION AND DRAG INTERACTION =====
   function handleLineSelection(e, drawing) {
     e.stopImmediatePropagation();
     e.preventDefault();
@@ -2252,9 +2469,49 @@
       return;
     }
     
-    if (e.button === 0) { // Left-click
+    if (e.button === 0) { // Left-click - Setup for potential drag
       selectedDrawing = drawing;
       console.log('[EOD] ✅ Selected', drawing.type, 'at index', drawing.index);
+      
+      // Initialize drag state
+      const rect = overlayCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      overlayState.isDragging = false;
+      overlayState.dragStart = { x, y };
+      overlayState.dragOffset = { x: 0, y: 0 };
+      overlayState.dragTarget = drawing;
+      
+      // For trendlines, determine if we're near an endpoint for resizing
+      if (drawing.type === 'trendline') {
+        const x1 = logicalToChart(drawing.drawing.x1Logical);
+        const y1 = priceToChart(drawing.drawing.y1Price);
+        const x2 = logicalToChart(drawing.drawing.x2Logical);
+        const y2 = priceToChart(drawing.drawing.y2Price);
+        
+        if (x1 !== null && y1 !== null && x2 !== null && y2 !== null) {
+          const startDist = Math.hypot(x - x1, y - y1);
+          const endDist = Math.hypot(x - x2, y - y2);
+          const resizeThreshold = 12;
+          
+          if (startDist <= resizeThreshold) {
+            overlayState.dragMode = 'resize-start';
+            overlayCanvas.style.cursor = 'nw-resize';
+          } else if (endDist <= resizeThreshold) {
+            overlayState.dragMode = 'resize-end';
+            overlayCanvas.style.cursor = 'nw-resize';
+          } else {
+            overlayState.dragMode = 'move';
+            overlayCanvas.style.cursor = 'move';
+          }
+        }
+      } else {
+        // Level - only move up/down
+        overlayState.dragMode = 'move';
+        overlayCanvas.style.cursor = 'ns-resize';
+      }
+      
       renderOverlay(); // Re-render to show selection
     }
   }
