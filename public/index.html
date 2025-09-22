@@ -2114,27 +2114,32 @@
   let selectedDrawing = null;
   
   function setupHoverDetection() {
-    console.log('[EOD] 🎯 Setting up hover detection on overlay canvas');
     
-    overlayCanvas.addEventListener('mousemove', (e) => {
-      console.log('[EOD] 🔍 Mouse move detected on overlay');
+    // Use chart container for hover detection to not interfere with chart interactions
+    const chartContainer = document.getElementById('chart');
+    
+    chartContainer.addEventListener('mousemove', (e) => {
       if (overlayState.drawingMode) return; // Don't interfere with drawing mode
       
-      const rect = overlayCanvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      // Get coordinates relative to overlay canvas
+      const overlayRect = overlayCanvas.getBoundingClientRect();
+      const x = e.clientX - overlayRect.left;
+      const y = e.clientY - overlayRect.top;
+      
+      // Check if mouse is within overlay bounds
+      if (x < 0 || y < 0 || x > overlayRect.width || y > overlayRect.height) {
+        if (hoveredDrawing) {
+          hoveredDrawing = null;
+          updateHoverFeedback();
+        }
+        return;
+      }
       
       const drawing = hitTestDrawings(x, y);
       
       if (drawing !== hoveredDrawing) {
         hoveredDrawing = drawing;
         updateHoverFeedback();
-      }
-      
-      // Only prevent chart interaction when NOT hovering over drawings or in drawing mode
-      if (!hoveredDrawing && !overlayState.drawingMode) {
-        // Allow chart interactions by not preventing the event
-        return;
       }
     });
     
@@ -2224,16 +2229,14 @@
   }
   
   function updateHoverFeedback() {
-    // CRITICAL FIX: Always enable pointer events for mousemove detection
-    // We'll handle chart interaction prevention in the event handlers
-    overlayCanvas.style.pointerEvents = 'auto';
+    // SMART POINTER EVENTS: Only intercept when hovering lines or in drawing mode
+    const shouldIntercept = overlayState.drawingMode || hoveredDrawing;
+    overlayCanvas.style.pointerEvents = shouldIntercept ? 'auto' : 'none';
     
-    console.log('[EOD] 🔧 updateHoverFeedback - drawingMode:', overlayState.drawingMode, 'hoveredDrawing:', !!hoveredDrawing);
     
     // Update cursor
     if (hoveredDrawing) {
       overlayCanvas.style.cursor = 'pointer';
-      console.log('[EOD] 🎯 Hovering over', hoveredDrawing.type, 'at index', hoveredDrawing.index);
     } else {
       overlayCanvas.style.cursor = overlayState.drawingMode ? 'crosshair' : 'default';
     }
@@ -2244,16 +2247,12 @@
     e.stopImmediatePropagation();
     e.preventDefault();
     
-    console.log('[EOD] 🖱️ handleLineSelection - button:', e.button, 'drawing:', drawing.type, 'index:', drawing.index);
-    
     if (e.button === 2) { // Right-click
-      console.log('[EOD] 🖱️ Right-click detected on', drawing.type);
       handleRightClickLine(e, drawing);
       return;
     }
     
     if (e.button === 0) { // Left-click
-      console.log('[EOD] 🖱️ Left-click detected on', drawing.type);
       selectedDrawing = drawing;
       console.log('[EOD] ✅ Selected', drawing.type, 'at index', drawing.index);
       renderOverlay(); // Re-render to show selection
