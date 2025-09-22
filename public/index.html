@@ -2258,7 +2258,7 @@
     },
     handleScroll: {
       mouseWheel: true,     // Enable mouse wheel zoom
-      pressedMouseMove: true,  // Enable drag panning
+      pressedMouseMove: true, // Enable both horizontal and vertical panning
       horzTouchDrag: true,  // Enable horizontal touch drag
       vertTouchDrag: true   // Enable vertical touch drag
     },
@@ -2359,7 +2359,22 @@
       e.preventDefault();
       
       // Disable chart interactions during drawing
-      chart.applyOptions({ handleScroll: false, handleScale: false });
+      chart.applyOptions({ 
+        handleScroll: {
+          mouseWheel: false,
+          pressedMouseMove: false,
+          horzTouchDrag: false,
+          vertTouchDrag: false
+        },
+        handleScale: {
+          mouseWheel: false,
+          pinch: false,
+          axisPressedMouseMove: {
+            time: false,
+            price: false
+          }
+        }
+      });
       
       const rect = overlayCanvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -2402,7 +2417,22 @@
       }
       
       // Re-enable chart interactions
-      chart.applyOptions({ handleScroll: true, handleScale: true });
+      chart.applyOptions({ 
+        handleScroll: {
+          mouseWheel: true,
+          pressedMouseMove: true,
+          horzTouchDrag: true,
+          vertTouchDrag: true
+        },
+        handleScale: {
+          mouseWheel: true,
+          pinch: true,
+          axisPressedMouseMove: {
+            time: true,
+            price: true
+          }
+        }
+      });
     }, { capture: true });
     
     // Update hover feedback when drawing mode changes
@@ -2440,7 +2470,22 @@
         console.log('[EOD] 🎯 Overlay drag started for', unifiedDragState.dragTarget.type, 'mode:', unifiedDragState.dragMode);
         
         // Disable chart interactions during drag
-        chart.applyOptions({ handleScroll: false, handleScale: false });
+        chart.applyOptions({ 
+          handleScroll: {
+            mouseWheel: false,
+            pressedMouseMove: false,
+            horzTouchDrag: false,
+            vertTouchDrag: false
+          },
+          handleScale: {
+            mouseWheel: false,
+            pinch: false,
+            axisPressedMouseMove: {
+              time: false,
+              price: false
+            }
+          }
+        });
       }
       
       if (overlayState.isDragging) {
@@ -2462,7 +2507,22 @@
         saveDrawingsAfterDrag();
         
         // Re-enable chart interactions
-        chart.applyOptions({ handleScroll: true, handleScale: true });
+        chart.applyOptions({ 
+          handleScroll: {
+            mouseWheel: true,
+            pressedMouseMove: true,
+            horzTouchDrag: true,
+            vertTouchDrag: true
+          },
+          handleScale: {
+            mouseWheel: true,
+            pinch: true,
+            axisPressedMouseMove: {
+              time: true,
+              price: true
+            }
+          }
+        });
       }
       
       // Reset drag state
@@ -2481,7 +2541,22 @@
       if (overlayState.isDragging) {
         // Complete the drag on leave
         saveDrawingsAfterDrag();
-        chart.applyOptions({ handleScroll: true, handleScale: true });
+        chart.applyOptions({ 
+          handleScroll: {
+            mouseWheel: true,
+            pressedMouseMove: true,
+            horzTouchDrag: true,
+            vertTouchDrag: true
+          },
+          handleScale: {
+            mouseWheel: true,
+            pinch: true,
+            axisPressedMouseMove: {
+              time: true,
+              price: true
+            }
+          }
+        });
       }
       
       // Reset drag state
