@@ -4694,6 +4694,18 @@
             alertName = `BB ${alert.band.charAt(0).toUpperCase() + alert.band.slice(1)} Band`;
           }
           break;
+          
+        case 'drawing_level':
+          // Drawing level alert - use stored target price
+          targetValue = alert.price;
+          alertName = `Drawing Level $${targetValue.toFixed(2)}`;
+          break;
+          
+        case 'drawing_trendline':
+          // Drawing trendline alert - use stored target price  
+          targetValue = alert.price;
+          alertName = `Drawing Trendline $${targetValue.toFixed(2)}`;
+          break;
       }
       
       if (targetValue === null) return;
