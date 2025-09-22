@@ -1752,10 +1752,10 @@
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
     
-    // Use existing hit testing logic to determine what was right-clicked
+    // Use existing hit testing logic to determine what was right-clicked (increased tolerance for right-click)
     const trendlineHit = hitTestTrendlines(px, py);
     const levelHit = hitTestLevel(px, py);
-    const indicatorHit = detectIndicatorClick(px, py);
+    const indicatorHit = detectIndicatorClick(px, py, 15); // Increased tolerance from 8 to 15 pixels for easier right-clicking
     
     let targetType = null;
     let targetData = null;
