@@ -1428,6 +1428,12 @@
   };
 
   function onPointerDown(e) {
+    // DISABLE DRAG SYSTEM DURING DRAWING MODE TO PREVENT CONFLICTS
+    if (drawingMode) {
+      console.log('[EOD] 🚫 Drag system disabled during drawing mode');
+      return; // Let the simple click system handle this
+    }
+    
     const chartContainer = document.getElementById('chart');
     chartContainer.setPointerCapture(e.pointerId);
     
@@ -1445,9 +1451,6 @@
       pendingDrag: null
     };
     
-    // DON'T freeze performance yet - wait for drag threshold
-    // freezeDuringDrag(true); // MOVED TO DRAG THRESHOLD
-    
     // Use screen-space hit testing for reliable selection
     const trendlineHit = hitTestTrendlines(px, py);
     const levelHit = hitTestLevel(px, py);
@@ -1455,14 +1458,26 @@
     if (trendlineHit) {
       const t = trendSeriesById.get(trendlineHit.id)?.data;
       if (t) {
+        // CRITICAL FIX: Validate coordinates before using them
         const time = chart.timeScale().coordinateToTime(px);
         const price = candleSeries.coordinateToPrice(py);
         
-        // Check if clicking near endpoints for resize
+        if (!time || !price || !isFinite(time) || !isFinite(price) || price <= 0) {
+          console.log('[EOD] ⚠️ Invalid coordinates - skipping trendline drag setup');
+          return;
+        }
+        
+        // Check if clicking near endpoints for resize - VALIDATE THESE TOO
         const x1 = chart.timeScale().timeToCoordinate(t.startTime);
         const y1 = candleSeries.priceToCoordinate(t.startPrice);
         const x2 = chart.timeScale().timeToCoordinate(t.endTime);
         const y2 = candleSeries.priceToCoordinate(t.endPrice);
+        
+        // Validate endpoint coordinates before using them
+        if ([x1, y1, x2, y2].some(v => v == null || !isFinite(v))) {
+          console.log('[EOD] ⚠️ Invalid trendline endpoint coordinates - skipping drag');
+          return;
+        }
         
         const startDist = Math.hypot(px - x1, py - y1);
         const endDist = Math.hypot(px - x2, py - y2);
@@ -1489,6 +1504,7 @@
         }
         
         chartContainer.style.cursor = pointerDownState.pendingDrag.mode === 'move' ? 'grab' : 'nw-resize';
+        console.log('[EOD] ✅ Trendline drag setup:', pointerDownState.pendingDrag.mode);
         e.preventDefault();
         e.stopPropagation();
       }
@@ -1496,6 +1512,7 @@
       // Store pending level drag (don't set isDragging yet)
       pointerDownState.pendingDrag = { type: 'level', id: levelHit.id };
       chartContainer.style.cursor = 'ns-resize';
+      console.log('[EOD] ✅ Level drag setup');
       e.preventDefault();
       e.stopPropagation();
     }
@@ -1553,9 +1570,15 @@
     const px = lastPointer.clientX - rect.left;
     const py = lastPointer.clientY - rect.top;
 
-    // Convert once per frame
+    // Convert once per frame with VALIDATION to prevent null errors
     const time = chart.timeScale().coordinateToTime(px);
     const price = candleSeries.coordinateToPrice(py);
+    
+    // CRITICAL: Validate coordinates before using them
+    if (!time || !price || !isFinite(time) || !isFinite(price) || price <= 0) {
+      console.log('[EOD] ⚠️ Invalid coordinates in processPointer - skipping frame');
+      return;
+    }
 
     // Only process drags if we've exceeded the threshold
     if (!pointerDownState.isDragging) return;
