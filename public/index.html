@@ -596,6 +596,10 @@
   // Global state for signal detection system
   let tfBars = [];  // Current timeframe bars for signal evaluation
   
+  // Global chart variables
+  let chart;
+  let candleSeries;
+  
   let watchlist = JSON.parse(localStorage.getItem('eod-watchlist') || '["AAPL", "META", "TSLA", "GOOGL", "MSFT"]');
   let currentSymbol = localStorage.getItem('eod-current-symbol') || 'AAPL';
   let currentTimeframe = localStorage.getItem('eod-current-timeframe') || '1D';
@@ -2238,7 +2242,7 @@
   });
 
   // ---- Chart init
-  const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+  chart = LightweightCharts.createChart(document.getElementById('chart'), {
     autoSize: true,
     layout: { background: { color: '#0e1a24' }, textColor: '#cbd5e1' },
     grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
@@ -2272,7 +2276,7 @@
       axisDoubleClickReset: false  // Disable double-click auto-reset
     }
   });
-  const candleSeries = chart.addCandlestickSeries();
+  candleSeries = chart.addCandlestickSeries();
   // indicators
   const emaSeries = chart.addLineSeries({ color: '#60a5fa', lineWidth: 2 });
   const bbUpperSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
