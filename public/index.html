@@ -179,6 +179,206 @@
       font-size: 12px;
     }
 
+    /* Alert Dialog Styling */
+    .alert-dialog-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+    }
+    
+    .alert-dialog-overlay.show {
+      display: flex;
+    }
+    
+    .alert-dialog {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8);
+      width: 420px;
+      max-width: 90vw;
+      font-size: 14px;
+      transform: scale(1);
+      transition: none;
+    }
+    
+    .alert-dialog-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px 12px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .alert-dialog-header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    
+    .alert-dialog-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 24px;
+      cursor: pointer;
+      padding: 0;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      transition: background-color 0.1s ease;
+    }
+    
+    .alert-dialog-close:hover {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--bad);
+    }
+    
+    .alert-dialog-content {
+      padding: 20px;
+    }
+    
+    .alert-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 20px;
+      padding: 12px;
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      border-radius: 8px;
+    }
+    
+    .alert-for-label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    
+    .alert-target-info {
+      color: var(--text);
+      font-weight: 500;
+    }
+    
+    .alert-direction-label {
+      color: var(--text);
+      font-weight: 500;
+      margin-bottom: 12px;
+    }
+    
+    .alert-direction-options {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    
+    .alert-option {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.1s ease;
+      background: rgba(15, 27, 43, 0.5);
+    }
+    
+    .alert-option:hover {
+      border-color: var(--accent);
+      background: rgba(59, 130, 246, 0.05);
+    }
+    
+    .alert-option input[type="radio"] {
+      margin: 0;
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+    }
+    
+    .alert-option input[type="radio"]:checked + .alert-option-text {
+      color: var(--accent);
+    }
+    
+    .alert-option-text {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex: 1;
+      color: var(--text);
+    }
+    
+    .alert-direction-text {
+      font-weight: 500;
+    }
+    
+    .alert-price {
+      font-family: ui-monospace, 'SF Mono', monospace;
+      font-size: 13px;
+      color: var(--accent);
+      background: rgba(59, 130, 246, 0.1);
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(59, 130, 246, 0.2);
+    }
+    
+    .alert-dialog-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+    }
+    
+    .alert-btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.1s ease;
+      border: 1px solid transparent;
+    }
+    
+    .alert-btn-cancel {
+      background: transparent;
+      border-color: var(--border);
+      color: var(--muted);
+    }
+    
+    .alert-btn-cancel:hover {
+      background: rgba(148, 163, 184, 0.1);
+      color: var(--text);
+    }
+    
+    .alert-btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+    
+    .alert-btn-primary:hover {
+      background: #2563eb;
+      border-color: #2563eb;
+    }
+    
+    .alert-btn-primary:disabled {
+      background: #374151;
+      border-color: #374151;
+      color: #6b7280;
+      cursor: not-allowed;
+    }
+
     /* Responsive */
     @media (max-width: 1200px) {
       main { grid-template-columns:1fr 280px; }
@@ -188,6 +388,9 @@
       main { grid-template-columns:1fr; }
       aside { order:-1; }
       #board { display:none; }
+      .alert-dialog {
+        width: 350px;
+      }
     }
 
   </style>
@@ -324,6 +527,45 @@
   <!-- Context Menu -->
   <div id="contextMenu">
     <!-- Menu items will be dynamically populated -->
+  </div>
+
+  <!-- Alert Direction Dialog -->
+  <div id="alertDialog" class="alert-dialog-overlay">
+    <div class="alert-dialog">
+      <div class="alert-dialog-header">
+        <h3>Alert Setup</h3>
+        <button class="alert-dialog-close">&times;</button>
+      </div>
+      <div class="alert-dialog-content">
+        <div class="alert-info">
+          <span class="alert-for-label">For:</span>
+          <span id="alertTargetInfo" class="alert-target-info"></span>
+        </div>
+        <div class="alert-direction">
+          <div class="alert-direction-label">Direction:</div>
+          <div class="alert-direction-options">
+            <label class="alert-option">
+              <input type="radio" name="alertDirection" value="above" />
+              <span class="alert-option-text">
+                <span class="alert-direction-text">Close Above</span>
+                <span id="alertPriceAbove" class="alert-price"></span>
+              </span>
+            </label>
+            <label class="alert-option">
+              <input type="radio" name="alertDirection" value="below" />
+              <span class="alert-option-text">
+                <span class="alert-direction-text">Close Below</span>
+                <span id="alertPriceBelow" class="alert-price"></span>
+              </span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="alert-dialog-footer">
+        <button id="alertCancelBtn" class="alert-btn alert-btn-cancel">Cancel</button>
+        <button id="alertSetBtn" class="alert-btn alert-btn-primary">Set Alert</button>
+      </div>
+    </div>
   </div>
 
 
@@ -583,30 +825,167 @@
     };
   }
   
-  // ==== CONTEXT MENU ACTION HANDLERS ====
-  function addAlert(type, data) {
-    // Placeholder for alert functionality
-    let message = '';
+  // ==== ALERT DIALOG SYSTEM ====
+  let alertDialogState = {
+    isVisible: false,
+    type: null,
+    data: null,
+    targetPrice: null,
+    targetInfo: ''
+  };
+
+  function showAlertDialog(type, data) {
+    const dialog = $('#alertDialog');
+    const targetInfo = $('#alertTargetInfo');
+    const priceAbove = $('#alertPriceAbove');
+    const priceBelow = $('#alertPriceBelow');
+    
+    // Store alert context
+    alertDialogState = {
+      isVisible: true,
+      type,
+      data,
+      targetPrice: null,
+      targetInfo: ''
+    };
+    
+    // Generate target info and price based on type
+    let info = '';
+    let price = null;
+    
     switch(type) {
       case 'trendline':
-        message = 'Alert on trendline (coming soon)';
+        info = 'Trendline';
+        // For trendlines, calculate current price at current time
+        if (data && tfBars && tfBars.length > 0) {
+          const currentTime = tfBars[tfBars.length - 1].time;
+          const slope = (data.endPrice - data.startPrice) / (data.endTime - data.startTime);
+          price = data.startPrice + slope * (currentTime - data.startTime);
+        }
         break;
       case 'level':
-        message = `Alert on level at $${data.price.toFixed(2)} (coming soon)`;
+        price = data.price;
+        info = `Level at $${price.toFixed(2)}`;
         break;
       case 'ema':
-        const emaValue = data && data.value ? data.value.toFixed(2) : 'N/A';
-        message = `Alert on EMA(200) at ${emaValue} (coming soon)`;
+        price = data.value;
+        info = `EMA(200) at ${price.toFixed(2)}`;
         break;
       case 'bb_upper':
       case 'bb_middle':
       case 'bb_lower':
-        const bbValue = data && data.value ? data.value.toFixed(2) : 'N/A';
-        const bbName = data && data.name ? data.name : 'BB';
-        message = `Alert on ${bbName} at ${bbValue} (coming soon)`;
+        price = data.value;
+        info = `${data.name} at ${price.toFixed(2)}`;
         break;
     }
-    log(message);
+    
+    if (price === null || isNaN(price)) {
+      log('Error: Could not determine price for alert');
+      return;
+    }
+    
+    // Update dialog content
+    targetInfo.textContent = info;
+    priceAbove.textContent = `$${price.toFixed(2)}`;
+    priceBelow.textContent = `$${price.toFixed(2)}`;
+    
+    alertDialogState.targetPrice = price;
+    alertDialogState.targetInfo = info;
+    
+    // Smart default selection based on current price vs target price
+    const currentPrice = tfBars && tfBars.length > 0 ? tfBars[tfBars.length - 1].close : price;
+    const defaultDirection = currentPrice < price ? 'above' : 'below';
+    
+    // Set default radio selection
+    const radioAbove = document.querySelector('input[name="alertDirection"][value="above"]');
+    const radioBelow = document.querySelector('input[name="alertDirection"][value="below"]');
+    
+    if (defaultDirection === 'above') {
+      radioAbove.checked = true;
+      radioBelow.checked = false;
+    } else {
+      radioBelow.checked = true;
+      radioAbove.checked = false;
+    }
+    
+    // Update Set Alert button state
+    updateSetAlertButton();
+    
+    // Show dialog
+    dialog.classList.add('show');
+  }
+  
+  function hideAlertDialog() {
+    const dialog = $('#alertDialog');
+    dialog.classList.remove('show');
+    alertDialogState = {
+      isVisible: false,
+      type: null,
+      data: null,
+      targetPrice: null,
+      targetInfo: ''
+    };
+  }
+  
+  function updateSetAlertButton() {
+    const setBtn = $('#alertSetBtn');
+    const checkedRadio = document.querySelector('input[name="alertDirection"]:checked');
+    
+    if (checkedRadio) {
+      setBtn.disabled = false;
+    } else {
+      setBtn.disabled = true;
+    }
+  }
+  
+  function createAlert() {
+    const checkedRadio = document.querySelector('input[name="alertDirection"]:checked');
+    
+    if (!checkedRadio || !alertDialogState.targetPrice) {
+      log('Error: Invalid alert configuration');
+      return;
+    }
+    
+    const direction = checkedRadio.value;
+    const alertData = {
+      id: 'alert_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+      symbol: currentSymbol,
+      timeframe: currentTimeframe,
+      type: alertDialogState.type,
+      direction, // 'above' or 'below'
+      price: alertDialogState.targetPrice,
+      targetInfo: alertDialogState.targetInfo,
+      lineData: alertDialogState.data,
+      created: Date.now(),
+      triggered: false
+    };
+    
+    // Store in localStorage
+    const existingAlerts = JSON.parse(localStorage.getItem('eod-alerts') || '[]');
+    existingAlerts.push(alertData);
+    localStorage.setItem('eod-alerts', JSON.stringify(existingAlerts));
+    
+    // Show confirmation
+    const directionText = direction === 'above' ? 'above' : 'below';
+    log(`✅ Alert set: Close ${directionText} $${alertDialogState.targetPrice.toFixed(2)} on ${alertDialogState.targetInfo}`);
+    
+    // Hide dialog
+    hideAlertDialog();
+    
+    // Update any alert displays if they exist
+    updateAlertsDisplay();
+  }
+  
+  function updateAlertsDisplay() {
+    // Placeholder for updating alerts UI - could add alerts section to sidebar
+    const alerts = JSON.parse(localStorage.getItem('eod-alerts') || '[]');
+    console.log(`[EOD] Total alerts: ${alerts.length}`);
+  }
+
+  // ==== CONTEXT MENU ACTION HANDLERS ====
+  function addAlert(type, data) {
+    // Show the alert direction dialog instead of placeholder message
+    showAlertDialog(type, data);
   }
   
   function openTrendlineSettings(trendline) {
@@ -659,7 +1038,7 @@
       if (index >= 0) {
         levels[index].price = parseFloat(newPrice);
         saveLevelsForSymbol(currentSymbol, currentTimeframe, levels);
-        drawAllLevels();
+        drawLevelsOnChart();
         updateLevelsList();
         evaluateCurrentSignals();
         log(`Level price updated to $${newPrice}`);
@@ -783,7 +1162,7 @@
       levels.forEach(l => {
         l.selected = (l.id === selectedLine.id);
       });
-      drawAllLevels();
+      drawLevelsOnChart();
     }
   }
 
@@ -1128,12 +1507,40 @@
   }
 
   // ---- Chart init
-  // Add event listeners for context menu
+  // Add event listeners for context menu and alert dialog
   document.addEventListener('click', onDocumentClick);
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && contextMenuState.isVisible) {
-      hideContextMenu();
+    if (e.key === 'Escape') {
+      if (alertDialogState.isVisible) {
+        hideAlertDialog();
+      } else if (contextMenuState.isVisible) {
+        hideContextMenu();
+      }
     }
+  });
+  
+  // Alert dialog event listeners
+  document.addEventListener('DOMContentLoaded', () => {
+    // Close button
+    $('#alertDialog .alert-dialog-close').addEventListener('click', hideAlertDialog);
+    
+    // Cancel button
+    $('#alertCancelBtn').addEventListener('click', hideAlertDialog);
+    
+    // Set alert button
+    $('#alertSetBtn').addEventListener('click', createAlert);
+    
+    // Radio button changes
+    document.querySelectorAll('input[name="alertDirection"]').forEach(radio => {
+      radio.addEventListener('change', updateSetAlertButton);
+    });
+    
+    // Click outside dialog to close
+    $('#alertDialog').addEventListener('click', (e) => {
+      if (e.target === $('#alertDialog')) {
+        hideAlertDialog();
+      }
+    });
   });
 
   // ---- Chart init
