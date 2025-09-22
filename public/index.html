@@ -643,45 +643,106 @@
 
   // ==== INDICATOR HIT TESTING ====
   function detectIndicatorClick(px, py, tolerancePx = 8) {
-    if (!chart || !candleSeries) return null;
+    console.log('[EOD] 🎯 Checking indicator click at', px, py, 'tolerance:', tolerancePx);
+    
+    if (!chart || !candleSeries) {
+      console.log('[EOD] ❌ No chart or candleSeries');
+      return null;
+    }
     
     const price = candleSeries.coordinateToPrice(py);
-    if (!price || !tfBars || tfBars.length === 0) return null;
-    
     const time = chart.timeScale().coordinateToTime(px);
-    if (!time) return null;
     
-    // Find nearest bar
-    const barIndex = tfBars.findIndex(bar => Math.abs(bar.time - time) <= 86400); // within 1 day
-    if (barIndex === -1) return null;
+    if (!price || !time || !isFinite(price) || !isFinite(time)) {
+      console.log('[EOD] ❌ Invalid coordinates:', { price, time });
+      return null;
+    }
     
-    const bar = tfBars[barIndex];
+    console.log('[EOD] 📊 Indicators state - EMA:', indicators.ema200, 'BB:', indicators.bb20);
     
-    // Check EMA(200) if visible
-    if (indicators.ema200 && bar.ema200) {
-      const emaY = candleSeries.priceToCoordinate(bar.ema200);
-      if (emaY && Math.abs(py - emaY) <= tolerancePx) {
-        return { type: 'ema', value: bar.ema200, name: 'EMA(200)' };
+    // Check EMA(200) if visible - USE ACTUAL SERIES DATA
+    if (indicators.ema200 && emaSeries) {
+      try {
+        // Get EMA value at this time by finding the closest bar
+        const emaData = emaSeries.data();
+        if (emaData && emaData.length > 0) {
+          // Find closest EMA point by time
+          const emaPoint = emaData.reduce((closest, current) => {
+            const currentDiff = Math.abs(current.time - time);
+            const closestDiff = Math.abs(closest.time - time);
+            return currentDiff < closestDiff ? current : closest;
+          });
+          
+          if (emaPoint && Math.abs(emaPoint.time - time) <= 86400) { // within 1 day
+            const emaY = candleSeries.priceToCoordinate(emaPoint.value);
+            if (emaY !== null && Math.abs(py - emaY) <= tolerancePx) {
+              console.log('[EOD] ✅ EMA hit detected at', emaPoint.value);
+              return { type: 'ema', value: emaPoint.value, name: 'EMA(200)', period: 200 };
+            }
+          }
+        }
+      } catch (error) {
+        console.log('[EOD] ⚠️ EMA detection error:', error);
       }
     }
     
-    // Check Bollinger Bands if visible
-    if (indicators.bb20 && bar.bb) {
-      const upperY = candleSeries.priceToCoordinate(bar.bb.upper);
-      const middleY = candleSeries.priceToCoordinate(bar.bb.middle);
-      const lowerY = candleSeries.priceToCoordinate(bar.bb.lower);
-      
-      if (upperY && Math.abs(py - upperY) <= tolerancePx) {
-        return { type: 'bb', band: 'upper', value: bar.bb.upper, name: 'BB Upper' };
-      }
-      if (middleY && Math.abs(py - middleY) <= tolerancePx) {
-        return { type: 'bb', band: 'middle', value: bar.bb.middle, name: 'BB Middle' };
-      }
-      if (lowerY && Math.abs(py - lowerY) <= tolerancePx) {
-        return { type: 'bb', band: 'lower', value: bar.bb.lower, name: 'BB Lower' };
+    // Check Bollinger Bands if visible - USE ACTUAL SERIES DATA
+    if (indicators.bb20 && bbUpperSeries && bbMiddleSeries && bbLowerSeries) {
+      try {
+        const upperData = bbUpperSeries.data();
+        const middleData = bbMiddleSeries.data();
+        const lowerData = bbLowerSeries.data();
+        
+        if (upperData && upperData.length > 0) {
+          // Find closest BB points by time
+          const upperPoint = upperData.reduce((closest, current) => {
+            const currentDiff = Math.abs(current.time - time);
+            const closestDiff = Math.abs(closest.time - time);
+            return currentDiff < closestDiff ? current : closest;
+          });
+          
+          const middlePoint = middleData.reduce((closest, current) => {
+            const currentDiff = Math.abs(current.time - time);
+            const closestDiff = Math.abs(closest.time - time);
+            return currentDiff < closestDiff ? current : closest;
+          });
+          
+          const lowerPoint = lowerData.reduce((closest, current) => {
+            const currentDiff = Math.abs(current.time - time);
+            const closestDiff = Math.abs(closest.time - time);
+            return currentDiff < closestDiff ? current : closest;
+          });
+          
+          if (upperPoint && Math.abs(upperPoint.time - time) <= 86400) {
+            const upperY = candleSeries.priceToCoordinate(upperPoint.value);
+            if (upperY !== null && Math.abs(py - upperY) <= tolerancePx) {
+              console.log('[EOD] ✅ BB Upper hit detected at', upperPoint.value);
+              return { type: 'bb', band: 'upper', value: upperPoint.value, name: 'BB Upper' };
+            }
+          }
+          
+          if (middlePoint && Math.abs(middlePoint.time - time) <= 86400) {
+            const middleY = candleSeries.priceToCoordinate(middlePoint.value);
+            if (middleY !== null && Math.abs(py - middleY) <= tolerancePx) {
+              console.log('[EOD] ✅ BB Middle hit detected at', middlePoint.value);
+              return { type: 'bb', band: 'middle', value: middlePoint.value, name: 'BB Middle' };
+            }
+          }
+          
+          if (lowerPoint && Math.abs(lowerPoint.time - time) <= 86400) {
+            const lowerY = candleSeries.priceToCoordinate(lowerPoint.value);
+            if (lowerY !== null && Math.abs(py - lowerY) <= tolerancePx) {
+              console.log('[EOD] ✅ BB Lower hit detected at', lowerPoint.value);
+              return { type: 'bb', band: 'lower', value: lowerPoint.value, name: 'BB Lower' };
+            }
+          }
+        }
+      } catch (error) {
+        console.log('[EOD] ⚠️ BB detection error:', error);
       }
     }
     
+    console.log('[EOD] ❌ No indicator hit detected');
     return null;
   }
 
@@ -1574,9 +1635,10 @@
     const time = chart.timeScale().coordinateToTime(px);
     const price = candleSeries.coordinateToPrice(py);
     
-    // CRITICAL: Validate coordinates before using them
-    if (!time || !price || !isFinite(time) || !isFinite(price) || price <= 0) {
-      console.log('[EOD] ⚠️ Invalid coordinates in processPointer - skipping frame');
+    // Validate coordinates but be less strict to avoid blocking valid operations
+    if (!time || !price || !isFinite(time) || !isFinite(price)) {
+      // Only log occasionally to avoid spam
+      if (Math.random() < 0.01) console.log('[EOD] ⚠️ Invalid coordinates in processPointer - skipping frame');
       return;
     }
 
