@@ -602,29 +602,55 @@
   let indicators = JSON.parse(localStorage.getItem('eod-indicators') || '{"ema200": true, "bb20": false}');
   let dailyBars = []; // Store raw daily data for resampling
   
-  // ===== ISOLATED DRAWING OVERLAY SYSTEM =====
+  // ===== UNIFIED DRAG STATE SYSTEM =====
   let overlayCanvas = null;
   let overlayCtx = null;
   let overlayDrawings = {}; // Organized by symbol+timeframe: {levels: [], trendlines: []}
-  let overlayState = {
+  
+  // REMOVED: overlayState - now using only unifiedDragState
+  
+  // UNIFIED DRAG STATE - Single source of truth for all drag operations
+  let unifiedDragState = {
+    // Drawing mode
     drawingMode: false,
     drawingTool: 'level', // 'level' or 'trendline'
     trendlineStart: null,
-    selectedDrawing: null,
+    
+    // Drag operation state
     isDragging: false,
-    dragOffset: { x: 0, y: 0 },
-    dragTarget: null,
-    dragStart: null,
-    dragMode: null, // 'move', 'resize-start', 'resize-end'
-    originalTrendline: null
+    dragType: null, // 'level', 'trendline', 'drawing', 'overlay-level', 'overlay-trendline'
+    dragTarget: null, // What we're dragging
+    dragMode: null, // 'move', 'resize-start', 'resize-end', 'level-move', 'trendline-move', 'trendline-start', 'trendline-end'
+    
+    // Drag coordinates (pixel space)
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    currentY: 0,
+    
+    // Drag coordinates (model space)
+    startTime: null,
+    startPrice: null,
+    currentTime: null,
+    currentPrice: null,
+    
+    // Original state for restoration
+    originalData: null,
+    originalTrendline: null,
+    dragOffset: null,
+    
+    // Pointer capture element
+    capturedElement: null,
+    
+    // State tracking
+    hasMoved: false,
+    pendingDrag: null
   };
   
   // Legacy drawing storage (will be migrated)
   let levels = {}; // Start fresh - now organized by symbol+timeframe
   let trendlines = {}; // Start fresh - now organized by symbol+timeframe
-  let drawingMode = false;
-  let drawingTool = 'level'; // 'level' or 'trendline'
-  let trendlineStart = null; // for 2-point trendline drawing
+  // REMOVED: drawingMode, drawingTool, trendlineStart - using unifiedDragState
   let previewTrendline = null; // preview line while drawing
   let previewUpdateThrottle = null; // throttle preview updates for performance
   // ==== OPTIMIZED CACHES FOR BUTTERY SMOOTH PERFORMANCE ====
@@ -636,16 +662,193 @@
   let lineHandles = []; // visual handles for selected line
   let isLineSelected = false; // flag to track selection state
   
-  // ==== OPTIMIZED DRAG STATES ====
-  let levelDragState = { isDragging: false, id: null };
-  let trendDragState = { 
-    isDragging: false, 
-    id: null, 
-    mode: null, // 'move' | 'start' | 'end'
-    base: { time: 0, price: 0 }, 
-    start: { time: 0, price: 0 }, 
-    end: { time: 0, price: 0 } 
-  };
+  // LEGACY DRAG STATES - REMOVED (Using unified system above)
+  
+  // ==== COORDINATE TRANSFORMATION FUNCTIONS WITH SAFETY ====
+  function safeChartToLogical(x) {
+    try {
+      if (!chart || !chart.timeScale() || x === null || x === undefined || !Number.isFinite(x)) {
+        return null;
+      }
+      
+      // Get chart container dimensions for bounds checking
+      const chartContainer = document.getElementById('chart');
+      if (chartContainer) {
+        const rect = chartContainer.getBoundingClientRect();
+        // Check if x coordinate is within reasonable chart bounds (with buffer)
+        if (x < -100 || x > rect.width + 100) {
+          return null; // Silently return null for coordinates far outside chart
+        }
+      }
+      
+      const logical = chart.timeScale().coordinateToLogical(x);
+      if (logical === null || logical === undefined || !Number.isFinite(logical)) {
+        return null; // TradingView API legitimately returns null for invalid coordinates
+      }
+      return logical;
+    } catch (error) {
+      // Only log actual unexpected errors
+      return null;
+    }
+  }
+  
+  function safeLogicalToChart(logical) {
+    try {
+      if (!chart || !chart.timeScale() || logical === null || logical === undefined || !Number.isFinite(logical)) {
+        console.warn('[EOD] 🚨 Invalid logical coordinate for logicalToChart:', logical);
+        return null;
+      }
+      const x = chart.timeScale().logicalToCoordinate(logical);
+      if (x === null || x === undefined || !Number.isFinite(x)) {
+        console.warn('[EOD] 🚨 logicalToChart returned invalid result:', x, 'for logical:', logical);
+        return null;
+      }
+      return x;
+    } catch (error) {
+      console.error('[EOD] 🚨 logicalToChart error:', error, 'logical:', logical);
+      return null;
+    }
+  }
+  
+  function safeChartToPrice(y) {
+    try {
+      if (!candleSeries || y === null || y === undefined || !Number.isFinite(y)) {
+        return null;
+      }
+      
+      // Get chart container dimensions for bounds checking
+      const chartContainer = document.getElementById('chart');
+      if (chartContainer) {
+        const rect = chartContainer.getBoundingClientRect();
+        // Check if y coordinate is within reasonable chart bounds
+        if (y < 0 || y > rect.height + 100) {
+          return null; // Silently return null for out-of-bounds coordinates
+        }
+      }
+      
+      const price = candleSeries.coordinateToPrice(y);
+      if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) {
+        return null; // Silently return null for invalid prices (including negative)
+      }
+      return price;
+    } catch (error) {
+      // Only log actual unexpected errors
+      return null;
+    }
+  }
+  
+  function safePriceToChart(price) {
+    try {
+      if (!candleSeries || price === null || price === undefined || !Number.isFinite(price) || price <= 0) {
+        console.warn('[EOD] 🚨 Invalid price for priceToChart:', price);
+        return null;
+      }
+      const y = candleSeries.priceToCoordinate(price);
+      if (y === null || y === undefined || !Number.isFinite(y)) {
+        console.warn('[EOD] 🚨 priceToChart returned invalid result:', y, 'for price:', price);
+        return null;
+      }
+      return y;
+    } catch (error) {
+      console.error('[EOD] 🚨 priceToChart error:', error, 'price:', price);
+      return null;
+    }
+  }
+  
+  function safeLogicalToTime(logical) {
+    try {
+      if (!chart || !chart.timeScale() || logical === null || logical === undefined || !Number.isFinite(logical)) {
+        return null;
+      }
+      
+      // Get the visible logical range to check bounds
+      const visibleRange = chart.timeScale().getVisibleLogicalRange();
+      if (visibleRange) {
+        // Add some buffer for out-of-bounds coordinates
+        const buffer = 50;
+        if (logical < (visibleRange.from - buffer) || logical > (visibleRange.to + buffer)) {
+          return null; // Coordinate is too far outside visible range
+        }
+      }
+      
+      const time = chart.timeScale().logicalToTime(logical);
+      if (time === null || time === undefined || !Number.isFinite(time)) {
+        return null; // TradingView API legitimately returns null for invalid coordinates
+      }
+      return time;
+    } catch (error) {
+      // Only log actual unexpected errors, not normal bounds checking
+      return null;
+    }
+  }
+  
+  function safeTimeToLogical(time) {
+    try {
+      if (!chart || !chart.timeScale() || time === null || time === undefined || !Number.isFinite(time)) {
+        console.warn('[EOD] 🚨 Invalid time for timeToLogical:', time);
+        return null;
+      }
+      const logical = chart.timeScale().timeToLogical(time);
+      if (logical === null || logical === undefined || !Number.isFinite(logical)) {
+        console.warn('[EOD] 🚨 timeToLogical returned invalid result:', logical, 'for time:', time);
+        return null;
+      }
+      return logical;
+    } catch (error) {
+      console.error('[EOD] 🚨 timeToLogical error:', error, 'time:', time);
+      return null;
+    }
+  }
+  
+  // Legacy function wrappers for backward compatibility
+  function chartToLogical(x) { return safeChartToLogical(x); }
+  function logicalToChart(logical) { return safeLogicalToChart(logical); }
+  function chartToPrice(y) { return safeChartToPrice(y); }
+  function priceToChart(price) { return safePriceToChart(price); }
+  
+  // ==== UNIFIED DRAG SYSTEM FUNCTIONS ====
+  function resetDragState() {
+    console.log('[EOD] 🔄 Resetting unified drag state');
+    unifiedDragState.isDragging = false;
+    unifiedDragState.dragType = null;
+    unifiedDragState.dragTarget = null;
+    unifiedDragState.dragMode = null;
+    unifiedDragState.startX = 0;
+    unifiedDragState.startY = 0;
+    unifiedDragState.currentX = 0;
+    unifiedDragState.currentY = 0;
+    unifiedDragState.startTime = null;
+    unifiedDragState.startPrice = null;
+    unifiedDragState.currentTime = null;
+    unifiedDragState.currentPrice = null;
+    unifiedDragState.originalData = null;
+    unifiedDragState.hasMoved = false;
+    unifiedDragState.pendingDrag = null;
+    
+    // Release pointer capture if active
+    if (unifiedDragState.capturedElement) {
+      try {
+        unifiedDragState.capturedElement.releasePointerCapture && unifiedDragState.capturedElement.releasePointerCapture(1);
+      } catch (e) {
+        console.warn('[EOD] ⚠️ Error releasing pointer capture:', e);
+      }
+      unifiedDragState.capturedElement = null;
+    }
+  }
+  
+  function logDragOperation(phase, details = {}) {
+    const state = unifiedDragState;
+    console.log(`[EOD] 🎯 DRAG ${phase.toUpperCase()}:`, {
+      type: state.dragType,
+      mode: state.dragMode,
+      pixel: { x: state.currentX, y: state.currentY, startX: state.startX, startY: state.startY },
+      model: { time: state.currentTime, price: state.currentPrice, startTime: state.startTime, startPrice: state.startPrice },
+      target: state.dragTarget ? state.dragTarget.id || 'no-id' : 'none',
+      hasMoved: state.hasMoved,
+      isDragging: state.isDragging,
+      ...details
+    });
+  }
   
   // ==== SINGLE RAF LOOP FOR 60FPS SMOOTH UPDATES ====
   let rafToken = null;
@@ -1526,38 +1729,45 @@
   }
 
   // ==== BUTTERY SMOOTH POINTER EVENT SYSTEM ====
-  let pointerDownState = {
-    startX: 0,
-    startY: 0,
-    startTime: 0,
-    isDragging: false,
-    hasMoved: false,
-    pendingDrag: null
-  };
+  // ===== UNIFIED POINTER EVENT HANDLERS WITH CAPTURE =====
+  // Legacy pointerDownState removed - using unifiedDragState now
 
   function onPointerDown(e) {
     // DISABLE DRAG SYSTEM DURING DRAWING MODE TO PREVENT CONFLICTS
-    if (drawingMode) {
-      console.log('[EOD] 🚫 Drag system disabled during drawing mode - tool:', drawingTool, 'mode:', drawingMode);
-      return; // Let the simple click system handle this
+    if (unifiedDragState.drawingMode) {
+      console.log('[EOD] 🚫 Drag system disabled during drawing mode - tool:', unifiedDragState.drawingTool, 'mode:', unifiedDragState.drawingMode);
+      return; // Let the drawing system handle this
     }
     
     const chartContainer = document.getElementById('chart');
-    chartContainer.setPointerCapture(e.pointerId);
     
+    // Get coordinates with safety checks
     const rect = chartContainer.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
+    const time = safeLogicalToTime(safeChartToLogical(px));
+    const price = safeChartToPrice(py);
     
-    // Record initial position and time for click vs drag detection
-    pointerDownState = {
-      startX: px,
-      startY: py,
-      startTime: Date.now(),
-      isDragging: false,
-      hasMoved: false,
-      pendingDrag: null
-    };
+    // Reset unified drag state
+    resetDragState();
+    
+    // Set initial coordinates
+    unifiedDragState.startX = px;
+    unifiedDragState.startY = py;
+    unifiedDragState.currentX = px;
+    unifiedDragState.currentY = py;
+    unifiedDragState.startTime = time;
+    unifiedDragState.startPrice = price;
+    unifiedDragState.currentTime = time;
+    unifiedDragState.currentPrice = price;
+    
+    logDragOperation('start', { px, py, time, price });
+    
+    // Validate coordinates early
+    if (!time || !price || !isFinite(time) || !isFinite(price) || price <= 0) {
+      console.log('[EOD] ⚠️ Invalid coordinates - skipping drag setup');
+      return;
+    }
     
     // Use screen-space hit testing for reliable selection
     const trendlineHit = hitTestTrendlines(px, py);
@@ -1566,14 +1776,13 @@
     if (trendlineHit) {
       const t = trendSeriesById.get(trendlineHit.id)?.data;
       if (t) {
-        // CRITICAL FIX: Validate coordinates before using them
-        const time = chart.timeScale().coordinateToTime(px);
-        const price = candleSeries.coordinateToPrice(py);
-        
-        if (!time || !price || !isFinite(time) || !isFinite(price) || price <= 0) {
-          console.log('[EOD] ⚠️ Invalid coordinates - skipping trendline drag setup');
-          return;
-        }
+        // Store original data for restoration
+        unifiedDragState.originalData = {
+          startTime: t.startTime,
+          startPrice: t.startPrice,
+          endTime: t.endTime,
+          endPrice: t.endPrice
+        };
         
         // Check if clicking near endpoints for resize - VALIDATE THESE TOO
         const x1 = chart.timeScale().timeToCoordinate(t.startTime);
@@ -1590,76 +1799,92 @@
         const startDist = Math.hypot(px - x1, py - y1);
         const endDist = Math.hypot(px - x2, py - y2);
         
-        // DON'T set isDragging=true yet - store pending drag info
+        // Determine drag mode
         if (startDist <= 12) {
-          pointerDownState.pendingDrag = {
-            type: 'trendline', id: trendlineHit.id, mode: 'start',
-            base: { time, price }, start: { time: t.startTime, price: t.startPrice },
-            end: { time: t.endTime, price: t.endPrice }
-          };
+          unifiedDragState.dragMode = 'trendline-start';
         } else if (endDist <= 12) {
-          pointerDownState.pendingDrag = {
-            type: 'trendline', id: trendlineHit.id, mode: 'end',
-            base: { time, price }, start: { time: t.startTime, price: t.startPrice },
-            end: { time: t.endTime, price: t.endPrice }
-          };
+          unifiedDragState.dragMode = 'trendline-end';
         } else {
-          pointerDownState.pendingDrag = {
-            type: 'trendline', id: trendlineHit.id, mode: 'move',
-            base: { time, price }, start: { time: t.startTime, price: t.startPrice },
-            end: { time: t.endTime, price: t.endPrice }
-          };
+          unifiedDragState.dragMode = 'trendline-move';
         }
         
-        chartContainer.style.cursor = pointerDownState.pendingDrag.mode === 'move' ? 'grab' : 'nw-resize';
-        console.log('[EOD] ✅ Trendline drag setup:', pointerDownState.pendingDrag.mode);
+        unifiedDragState.dragType = 'trendline';
+        unifiedDragState.dragTarget = { id: trendlineHit.id, data: t };
+        unifiedDragState.pendingDrag = { type: 'trendline', id: trendlineHit.id };
+        
+        // Set pointer capture for reliable event tracking
+        try {
+          chartContainer.setPointerCapture(e.pointerId);
+          unifiedDragState.capturedElement = chartContainer;
+        } catch (captureError) {
+          console.warn('[EOD] ⚠️ Could not set pointer capture:', captureError);
+        }
+        
+        chartContainer.style.cursor = unifiedDragState.dragMode === 'trendline-move' ? 'grab' : 'nw-resize';
+        console.log('[EOD] ✅ Trendline drag setup:', unifiedDragState.dragMode);
         e.preventDefault();
         e.stopPropagation();
       }
     } else if (levelHit) {
-      // Store pending level drag (don't set isDragging yet)
-      pointerDownState.pendingDrag = { type: 'level', id: levelHit.id };
-      chartContainer.style.cursor = 'ns-resize';
-      console.log('[EOD] ✅ Level drag setup');
-      e.preventDefault();
-      e.stopPropagation();
+      // Setup level drag
+      const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+      const level = levels.find(l => l.id === levelHit.id);
+      if (level) {
+        unifiedDragState.originalData = { price: level.price };
+        unifiedDragState.dragType = 'level';
+        unifiedDragState.dragMode = 'level-move';
+        unifiedDragState.dragTarget = { id: levelHit.id, data: level };
+        unifiedDragState.pendingDrag = { type: 'level', id: levelHit.id };
+        
+        // Set pointer capture
+        try {
+          chartContainer.setPointerCapture(e.pointerId);
+          unifiedDragState.capturedElement = chartContainer;
+        } catch (captureError) {
+          console.warn('[EOD] ⚠️ Could not set pointer capture:', captureError);
+        }
+        
+        chartContainer.style.cursor = 'ns-resize';
+        console.log('[EOD] ✅ Level drag setup');
+        e.preventDefault();
+        e.stopPropagation();
+      }
     }
   }
 
   function onPointerMove(e) {
     lastPointer = e; // stash the latest event
     
+    // Update current coordinates with safety checks
+    const rect = document.getElementById('chart').getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const time = safeLogicalToTime(safeChartToLogical(px));
+    const price = safeChartToPrice(py);
+    
+    unifiedDragState.currentX = px;
+    unifiedDragState.currentY = py;
+    unifiedDragState.currentTime = time;
+    unifiedDragState.currentPrice = price;
+    
     // Track movement for click vs drag detection
-    if (pointerDownState && !pointerDownState.isDragging && pointerDownState.pendingDrag) {
-      const rect = document.getElementById('chart').getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
-      
-      const deltaX = Math.abs(px - pointerDownState.startX);
-      const deltaY = Math.abs(py - pointerDownState.startY);
+    if (!unifiedDragState.isDragging && unifiedDragState.pendingDrag) {
+      const deltaX = Math.abs(px - unifiedDragState.startX);
+      const deltaY = Math.abs(py - unifiedDragState.startY);
       const totalMovement = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
       
       // If movement exceeds threshold, activate drag mode
       if (totalMovement > 5) {
-        pointerDownState.isDragging = true;
-        pointerDownState.hasMoved = true;
+        unifiedDragState.isDragging = true;
+        unifiedDragState.hasMoved = true;
         
-        // Activate the pending drag based on type
-        if (pointerDownState.pendingDrag.type === 'trendline') {
-          trendDragState = {
-            isDragging: true,
-            id: pointerDownState.pendingDrag.id,
-            mode: pointerDownState.pendingDrag.mode,
-            base: pointerDownState.pendingDrag.base,
-            start: pointerDownState.pendingDrag.start,
-            end: pointerDownState.pendingDrag.end
-          };
-        } else if (pointerDownState.pendingDrag.type === 'level') {
-          levelDragState = { 
-            isDragging: true, 
-            id: pointerDownState.pendingDrag.id 
-          };
-        }
+        logDragOperation('activated', { 
+          totalMovement, 
+          deltaX, 
+          deltaY,
+          threshold: 5,
+          pendingType: unifiedDragState.pendingDrag.type
+        });
         
         // NOW start performance freezing for drag
         freezeDuringDrag(true);
@@ -1672,213 +1897,248 @@
 
   function processPointer() {
     rafToken = null;
-    if (!lastPointer) return;
-
+    if (!lastPointer || !unifiedDragState.isDragging) return;
+    
     const rect = document.getElementById('chart').getBoundingClientRect();
     const px = lastPointer.clientX - rect.left;
     const py = lastPointer.clientY - rect.top;
-
-    // Convert once per frame with VALIDATION to prevent null errors
-    const time = chart.timeScale().coordinateToTime(px);
-    const price = candleSeries.coordinateToPrice(py);
+    const time = safeLogicalToTime(safeChartToLogical(px));
+    const price = safeChartToPrice(py);
     
-    // Only validate that we have a valid price for dragging operations
-    if (!price || !isFinite(price)) {
-      // Only log occasionally to avoid spam
-      if (Math.random() < 0.01) console.log('[EOD] ⚠️ Invalid price in processPointer - skipping frame');
+    // Validate coordinates
+    if (time === null || price === null) {
+      console.warn('[EOD] ⚠️ Invalid coordinates during drag, skipping frame');
       return;
     }
     
-    // For time, allow null/undefined in some edge cases but validate when used
-    if (time !== null && time !== undefined && !isFinite(time)) {
-      if (Math.random() < 0.01) console.log('[EOD] ⚠️ Invalid time in processPointer - skipping frame');
-      return;
+    // Update current position
+    unifiedDragState.currentX = px;
+    unifiedDragState.currentY = py;
+    unifiedDragState.currentTime = time;
+    unifiedDragState.currentPrice = price;
+    
+    logDragOperation('move', { px, py, time, price });
+    
+    // Handle different drag types
+    if (unifiedDragState.dragType === 'level') {
+      handleLevelDrag();
+    } else if (unifiedDragState.dragType === 'trendline') {
+      handleTrendlineDrag();
     }
-
-    // Only process drags if we've exceeded the threshold
-    if (!pointerDownState.isDragging) return;
-
-    // 1) drag level
-    if (levelDragState.isDragging && levelDragState.id && Number.isFinite(price)) {
-      const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
-      const i = levels.findIndex(L => L.id === levelDragState.id);
-      if (i >= 0 && levels[i].price !== price) {
-        levels[i].price = price; // update model
-        // update only that line (recreate just 1 priceLine)
-        const rec = levelLineById.get(levelDragState.id);
-        if (rec) {
-          try { candleSeries.removePriceLine(rec.line); } catch {}
-          const line = candleSeries.createPriceLine({
-            price,
-            color: levels[i].selected ? '#22d3ee' : (levels[i].color || '#60a5fa'),
-            lineWidth: levels[i].selected ? 5 : 2,
-            lineStyle: 0, axisLabelVisible: true, title: `Level ${price.toFixed(2)}`
-          });
-          levelLineById.set(levelDragState.id, { line, data: levels[i] });
-        }
+  }
+  
+  function handleLevelDrag() {
+    if (!unifiedDragState.dragTarget || !Number.isFinite(unifiedDragState.currentPrice)) return;
+    
+    const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+    const levelIndex = levels.findIndex(l => l.id === unifiedDragState.dragTarget.id);
+    
+    if (levelIndex >= 0 && levels[levelIndex].price !== unifiedDragState.currentPrice) {
+      levels[levelIndex].price = unifiedDragState.currentPrice;
+      
+      // Update visual representation
+      const rec = levelLineById.get(unifiedDragState.dragTarget.id);
+      if (rec) {
+        try { candleSeries.removePriceLine(rec.line); } catch {}
+        const line = candleSeries.createPriceLine({
+          price: unifiedDragState.currentPrice,
+          color: levels[levelIndex].selected ? '#22d3ee' : (levels[levelIndex].color || '#60a5fa'),
+          lineWidth: levels[levelIndex].selected ? 5 : 2,
+          lineStyle: 0, 
+          axisLabelVisible: true, 
+          title: `Level ${unifiedDragState.currentPrice.toFixed(2)}`
+        });
+        levelLineById.set(unifiedDragState.dragTarget.id, { line, data: levels[levelIndex] });
       }
     }
-
-    // 2) drag trendline with intelligent extension  
-    if (trendDragState.isDragging && trendDragState.id && time != null && Number.isFinite(price)) {
-      console.log('[EOD] 🎯 Processing trendline drag - Time:', time, 'Price:', price);
-      const arr = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-      const idx = arr.findIndex(t => t.id === trendDragState.id);
-      if (idx >= 0) {
-        const t = arr[idx];
-        let trendlineData = null;
-        
-        if (trendDragState.mode === 'move') {
-          // Standard move operation - move entire trendline
-          const dt = time - trendDragState.base.time;
-          const dp = price - trendDragState.base.price;
-          t.startTime = trendDragState.start.time + dt;
-          t.startPrice = trendDragState.start.price + dp;
-          t.endTime = trendDragState.end.time + dt;
-          t.endPrice = trendDragState.end.price + dp;
-          
-          // Use standard points for move operations
+  }
+  
+  function handleTrendlineDrag() {
+    if (!unifiedDragState.dragTarget || 
+        !Number.isFinite(unifiedDragState.currentTime) || 
+        !Number.isFinite(unifiedDragState.currentPrice)) return;
+    
+    const trendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    const trendlineIndex = trendlines.findIndex(t => t.id === unifiedDragState.dragTarget.id);
+    
+    if (trendlineIndex < 0) return;
+    
+    const trendline = trendlines[trendlineIndex];
+    const original = unifiedDragState.originalData;
+    let trendlineData = null;
+    
+    if (unifiedDragState.dragMode === 'trendline-move') {
+      // Move entire trendline
+      const deltaTime = unifiedDragState.currentTime - unifiedDragState.startTime;
+      const deltaPrice = unifiedDragState.currentPrice - unifiedDragState.startPrice;
+      
+      trendline.startTime = original.startTime + deltaTime;
+      trendline.startPrice = original.startPrice + deltaPrice;
+      trendline.endTime = original.endTime + deltaTime;
+      trendline.endPrice = original.endPrice + deltaPrice;
+      
+      // Prevent times from going negative
+      if (trendline.startTime < 0) {
+        const correction = -trendline.startTime;
+        trendline.startTime += correction;
+        trendline.endTime += correction;
+      }
+      
+      trendlineData = [
+        { time: trendline.startTime, value: trendline.startPrice },
+        { time: trendline.endTime, value: trendline.endPrice }
+      ];
+      
+    } else if (unifiedDragState.dragMode === 'trendline-start') {
+      trendline.startTime = unifiedDragState.currentTime;
+      trendline.startPrice = unifiedDragState.currentPrice;
+      
+      // Calculate intelligent extension
+      const extensionInfo = getExtensionDirection(trendline, 'start');
+      if (extensionInfo) {
+        const extendedTrendline = calculateExtendedTrendline(trendline, extensionInfo, unifiedDragState.currentTime, unifiedDragState.currentPrice);
+        if (extendedTrendline) {
           trendlineData = [
-            { time: t.startTime, value: t.startPrice },
-            { time: t.endTime, value: t.endPrice }
+            { time: extendedTrendline.startTime, value: extendedTrendline.startPrice },
+            { time: extendedTrendline.endTime, value: extendedTrendline.endPrice }
           ];
-          
-        } else if (trendDragState.mode === 'start' || trendDragState.mode === 'end') {
-          // Smart extension for endpoint dragging
-          
-          // First update the dragged endpoint
-          if (trendDragState.mode === 'start') {
-            t.startTime = time; 
-            t.startPrice = price;
-          } else {
-            t.endTime = time; 
-            t.endPrice = price;
-          }
-          
-          // Calculate intelligent extension based on drag direction
-          const extensionInfo = getExtensionDirection(t, trendDragState.mode);
-          if (extensionInfo) {
-            const extendedTrendline = calculateExtendedTrendline(t, extensionInfo, time, price);
-            
-            if (extendedTrendline) {
-              // Use extended trendline data for visual feedback
-              trendlineData = [
-                { time: extendedTrendline.startTime, value: extendedTrendline.startPrice },
-                { time: extendedTrendline.endTime, value: extendedTrendline.endPrice }
-              ];
-              
-              // Log extension feedback for user awareness
-              const direction = extendedTrendline.extensionDirection;
-              if (direction !== 'none') {
-                // Only log occasionally to avoid spam (every 10th frame approximately)
-                if (Math.random() < 0.1) {
-                  log(`📏 Extending trendline ${direction}ward`);
-                }
-              }
-            } else {
-              // Fallback to standard points if extension calculation fails
-              trendlineData = [
-                { time: t.startTime, value: t.startPrice },
-                { time: t.endTime, value: t.endPrice }
-              ];
-            }
-          } else {
-            // Fallback to standard points if no extension info
-            trendlineData = [
-              { time: t.startTime, value: t.startPrice },
-              { time: t.endTime, value: t.endPrice }
-            ];
-          }
         }
+      }
+      
+      if (!trendlineData) {
+        trendlineData = [
+          { time: trendline.startTime, value: trendline.startPrice },
+          { time: trendline.endTime, value: trendline.endPrice }
+        ];
+      }
+      
+    } else if (unifiedDragState.dragMode === 'trendline-end') {
+      trendline.endTime = unifiedDragState.currentTime;
+      trendline.endPrice = unifiedDragState.currentPrice;
+      
+      // Calculate intelligent extension
+      const extensionInfo = getExtensionDirection(trendline, 'end');
+      if (extensionInfo) {
+        const extendedTrendline = calculateExtendedTrendline(trendline, extensionInfo, unifiedDragState.currentTime, unifiedDragState.currentPrice);
+        if (extendedTrendline) {
+          trendlineData = [
+            { time: extendedTrendline.startTime, value: extendedTrendline.startPrice },
+            { time: extendedTrendline.endTime, value: extendedTrendline.endPrice }
+          ];
+        }
+      }
+      
+      if (!trendlineData) {
+        trendlineData = [
+          { time: trendline.startTime, value: trendline.startPrice },
+          { time: trendline.endTime, value: trendline.endPrice }
+        ];
+      }
+    }
+    
+    // Update visual representation
+    if (trendlineData) {
+      const rec = trendSeriesById.get(unifiedDragState.dragTarget.id);
+      if (rec) {
+        try { chart.removeSeries(rec.series); } catch {}
         
-        // Update the visual trendline with calculated data (standard or extended)
-        const rec = trendSeriesById.get(trendDragState.id);
-        if (rec && trendlineData) {
-          rec.data = t; // keep cache in sync with base trendline data
-          rec.series.setData(trendlineData); // update visual with potentially extended data
-        }
+        const newSeries = chart.addLineSeries({
+          color: trendline.color,
+          lineWidth: 2,
+          lineStyle: trendline.style || 0,
+          priceLineVisible: false,
+          lastValueVisible: false
+        });
+        
+        newSeries.setData(trendlineData);
+        trendSeriesById.set(unifiedDragState.dragTarget.id, { series: newSeries, data: trendline });
       }
     }
   }
 
   function onPointerUp(e) {
     const chartContainer = document.getElementById('chart');
-    try { chartContainer.releasePointerCapture(e.pointerId); } catch {}
     
-    // Stop performance freezing
+    // Always stop performance freezing on pointer up
     freezeDuringDrag(false);
     
     const rect = chartContainer.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
+    const time = safeLogicalToTime(safeChartToLogical(px));
+    const price = safeChartToPrice(py);
     
-    // Check if this was a click vs drag
-    const duration = Date.now() - pointerDownState.startTime;
-    const deltaX = Math.abs(px - pointerDownState.startX);
-    const deltaY = Math.abs(py - pointerDownState.startY);
+    // Calculate gesture stats
+    const deltaX = Math.abs(px - unifiedDragState.startX);
+    const deltaY = Math.abs(py - unifiedDragState.startY);
     const totalMovement = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
     
-    const wasClick = !pointerDownState.hasMoved && 
+    const wasClick = !unifiedDragState.hasMoved && 
                      totalMovement < 5 && 
-                     duration < 300 && 
-                     !drawingMode;
+                     !unifiedDragState.drawingMode;
+    
+    logDragOperation('end', { 
+      wasClick, 
+      totalMovement, 
+      deltaX, 
+      deltaY,
+      finalTime: time,
+      finalPrice: price
+    });
     
     if (wasClick) {
       // HANDLE CLICK - Check for alert setup
-      const time = chart.timeScale().coordinateToTime(px);
-      const price = candleSeries.coordinateToPrice(py);
-      
       if (time && price) {
-        // Check for line clicks first
-        const trendlineHit = hitTestTrendlines(px, py);
-        const levelHit = hitTestLevel(px, py);
-        
-        if (trendlineHit) {
-          const t = trendSeriesById.get(trendlineHit.id)?.data;
-          if (t) {
-            // Select trendline for editing
-            selectLine({ type: 'trendline', id: trendlineHit.id, data: t });
-            log(`Selected trendline for editing`);
-          }
-        } else if (levelHit) {
-          const level = levelLineById.get(levelHit.id)?.data;
-          if (level) {
-            // Select level for editing
-            selectLine({ type: 'level', id: levelHit.id, data: level });
-            log(`Selected level at $${level.price.toFixed(2)} for editing`);
-          }
-        } else {
-          // Deselect any selected line if clicking on empty space
-          if (selectedLine) {
-            deselectLine();
-            log('Line deselected');
-          }
+        // Comprehensive detection in priority order:
+        // 1. Check for trendline clicks (highest priority)
+        const trendHit = detectTrendlineClick(px, py);
+        if (trendHit) {
+          showContextMenu(px + rect.left, py + rect.top, 'trendline', trendHit);
+          resetDragState();
+          return;
         }
+        
+        // 2. Check for indicator clicks (EMA, BB bands)
+        const indicatorHit = detectIndicatorClick(px, py);
+        if (indicatorHit) {
+          showContextMenu(px + rect.left, py + rect.top, indicatorHit.type, indicatorHit);
+          resetDragState();
+          return;
+        }
+        
+        // 3. Check for level clicks
+        const levelHit = detectLevelClick(px, py);
+        if (levelHit) {
+          showContextMenu(px + rect.left, py + rect.top, 'level', levelHit);
+          resetDragState();
+          return;
+        }
+        
+        // 4. If nothing hit, this is an empty area click - hide any open menus
+        hideContextMenu();
       }
       
-      // Reset pointer state after click
-      pointerDownState = { startX: 0, startY: 0, startTime: 0, isDragging: false, hasMoved: false, pendingDrag: null };
-      lastPointer = null;
-      chartContainer.style.cursor = '';
+      resetDragState();
       return;
     }
     
     // HANDLE DRAG END - finalize: save to storage, rebuild handles once, clear drag states
-    if (levelDragState.isDragging) {
-      levelDragState = { isDragging: false, id: null };
-      saveLevelsForSymbol(currentSymbol, currentTimeframe, getLevelsForSymbol(currentSymbol, currentTimeframe));
-      updateLineHandles();
-      evaluateCurrentSignals(); // Update signals after level drag
-    }
-    if (trendDragState.isDragging) {
-      trendDragState.isDragging = false;
-      saveTrendlinesForSymbol(currentSymbol, currentTimeframe, getTrendlinesForSymbol(currentSymbol, currentTimeframe));
-      updateLineHandles();
-      evaluateCurrentSignals(); // Update signals after trendline drag
+    if (unifiedDragState.isDragging) {
+      if (unifiedDragState.dragType === 'level') {
+        saveLevelsForSymbol(currentSymbol, currentTimeframe, getLevelsForSymbol(currentSymbol, currentTimeframe));
+        updateLineHandles();
+        evaluateCurrentSignals();
+        console.log('[EOD] 💾 Level drag completed & saved');
+      } else if (unifiedDragState.dragType === 'trendline') {
+        saveTrendlinesForSymbol(currentSymbol, currentTimeframe, getTrendlinesForSymbol(currentSymbol, currentTimeframe));
+        updateLineHandles();
+        evaluateCurrentSignals();
+        console.log('[EOD] 💾 Trendline drag completed & saved');
+      }
     }
     
-    // Reset ALL pointer state
-    pointerDownState = { startX: 0, startY: 0, startTime: 0, isDragging: false, hasMoved: false, pendingDrag: null };
+    // Clean up state
+    resetDragState();
     lastPointer = null;
     chartContainer.style.cursor = '';
   }
@@ -2048,10 +2308,10 @@
   function setupOverlayEventHandling() {
     
     overlayCanvas.addEventListener('pointerdown', (e) => {
-      console.log('[EOD] 🎯 Overlay canvas clicked! Drawing mode:', overlayState.drawingMode, 'Tool:', overlayState.drawingTool);
+      console.log('[EOD] 🎯 Overlay canvas clicked! Drawing mode:', unifiedDragState.drawingMode, 'Tool:', unifiedDragState.drawingTool);
       
       // Handle line selection when not in drawing mode
-      if (!overlayState.drawingMode) {
+      if (!unifiedDragState.drawingMode) {
         if (hoveredDrawing) {
           handleLineSelection(e, hoveredDrawing);
         } else {
@@ -2077,24 +2337,28 @@
       console.log('[EOD] 🎯 Processing overlay click - logical:', logical, 'price:', price);
       
       if (logical !== null && price !== null && !isNaN(logical) && !isNaN(price)) {
-        if (overlayState.drawingTool === 'level') {
+        if (unifiedDragState.drawingTool === 'level') {
           overlayAddLevel(price);
-          overlayState.drawingMode = false;
+          unifiedDragState.drawingMode = false;
           $('#level-tool').classList.remove('active');
           document.body.classList.remove('drawing-mode');
           updateHoverFeedback();
           console.log('[EOD] ✅ Overlay level completed');
-        } else if (overlayState.drawingTool === 'trendline') {
-          if (!overlayState.trendlineStart) {
-            overlayState.trendlineStart = { logical, price };
+        } else if (unifiedDragState.drawingTool === 'trendline') {
+          if (!unifiedDragState.trendlineStart) {
+            unifiedDragState.trendlineStart = { logical, price };
             console.log('[EOD] Trendline started, click second point');
           } else {
+            // Convert logical coordinates to time using the chart API
+            const startTime = chart.timeScale().coordinateToTime(chart.timeScale().logicalToCoordinate(unifiedDragState.trendlineStart.logical));
+            const endTime = chart.timeScale().coordinateToTime(chart.timeScale().logicalToCoordinate(logical));
+            
             overlayAddTrendline(
-              overlayState.trendlineStart.logical, overlayState.trendlineStart.price,
-              logical, price
+              startTime, unifiedDragState.trendlineStart.price,
+              endTime, price
             );
-            overlayState.trendlineStart = null;
-            overlayState.drawingMode = false;
+            unifiedDragState.trendlineStart = null;
+            unifiedDragState.drawingMode = false;
             $('#trendline-tool').classList.remove('active');
             document.body.classList.remove('drawing-mode');
             updateHoverFeedback();
@@ -2125,7 +2389,7 @@
     
     // Mouse move handler for dragging
     overlayCanvas.addEventListener('pointermove', (e) => {
-      if (!overlayState.dragTarget) return;
+      if (!unifiedDragState.dragTarget) return;
       
       const rect = overlayCanvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -2139,7 +2403,7 @@
       // Activate drag mode if movement exceeds threshold
       if (!overlayState.isDragging && totalMovement > 5) {
         overlayState.isDragging = true;
-        console.log('[EOD] 🎯 Drag started for', overlayState.dragTarget.type, 'mode:', overlayState.dragMode);
+        console.log('[EOD] 🎯 Overlay drag started for', unifiedDragState.dragTarget.type, 'mode:', unifiedDragState.dragMode);
         
         // Disable chart interactions during drag
         chart.applyOptions({ handleScroll: false, handleScale: false });
@@ -2158,7 +2422,7 @@
     // Mouse up handler to complete drag
     overlayCanvas.addEventListener('pointerup', (e) => {
       if (overlayState.isDragging) {
-        console.log('[EOD] 🎯 Drag completed for', overlayState.dragTarget.type);
+        console.log('[EOD] 🎯 Overlay drag completed for', unifiedDragState.dragTarget.type);
         
         // Save changes to storage
         saveDrawingsAfterDrag();
@@ -2168,11 +2432,13 @@
       }
       
       // Reset drag state
-      overlayState.isDragging = false;
-      overlayState.dragTarget = null;
-      overlayState.dragStart = null;
-      overlayState.dragOffset = null;
-      overlayState.dragMode = null;
+      // Reset unified drag state
+      unifiedDragState.isDragging = false;
+      unifiedDragState.dragTarget = null;
+      unifiedDragState.dragType = null;
+      unifiedDragState.dragMode = null;
+      unifiedDragState.originalData = null;
+      unifiedDragState.originalTrendline = null;
       overlayCanvas.style.cursor = hoveredDrawing ? 'pointer' : 'default';
     });
     
@@ -2185,31 +2451,33 @@
       }
       
       // Reset drag state
-      overlayState.isDragging = false;
-      overlayState.dragTarget = null;
-      overlayState.dragStart = null;
-      overlayState.dragOffset = null;
-      overlayState.dragMode = null;
+      // Reset unified drag state
+      unifiedDragState.isDragging = false;
+      unifiedDragState.dragTarget = null;
+      unifiedDragState.dragType = null;
+      unifiedDragState.dragMode = null;
+      unifiedDragState.originalData = null;
+      unifiedDragState.originalTrendline = null;
       overlayCanvas.style.cursor = 'default';
     });
   }
 
   // ===== DRAG POSITION UPDATING FUNCTIONS =====
   function updateLinePositionDuringDrag(x, y) {
-    if (!overlayState.dragTarget || !overlayState.isDragging) return;
+    if (!unifiedDragState.dragTarget || !unifiedDragState.isDragging) return;
     
-    const drawing = overlayState.dragTarget.drawing;
-    const index = overlayState.dragTarget.index;
+    const drawing = unifiedDragState.dragTarget.drawing;
+    const index = unifiedDragState.dragTarget.index;
     const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
     
-    if (overlayState.dragTarget.type === 'level') {
+    if (unifiedDragState.dragTarget.type === 'level') {
       // Level: Only allow vertical movement (price changes)
       const newPrice = chartToPrice(y);
       if (newPrice !== null && !isNaN(newPrice) && newPrice > 0) {
         drawings.levels[index].price = newPrice;
         console.log('[EOD] 🎯 Level dragged to price:', newPrice.toFixed(2));
       }
-    } else if (overlayState.dragTarget.type === 'trendline') {
+    } else if (unifiedDragState.dragTarget.type === 'trendline') {
       // Trendline: Handle different drag modes
       const logical = chartToLogical(x);
       const price = chartToPrice(y);
@@ -2254,7 +2522,7 @@
   }
   
   function saveDrawingsAfterDrag() {
-    if (!overlayState.dragTarget) return;
+    if (!unifiedDragState.dragTarget) return;
     
     const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
     const key = getDrawingKey(currentSymbol, currentTimeframe);
@@ -2301,7 +2569,7 @@
       // Store mouse event for cursor positioning
       window.lastMouseEvent = e;
       
-      if (overlayState.drawingMode) return; // Don't interfere with drawing mode
+      if (unifiedDragState.drawingMode) return; // Don't interfere with drawing mode
       
       // Get coordinates relative to overlay canvas
       const overlayRect = overlayCanvas.getBoundingClientRect();
@@ -2412,7 +2680,7 @@
   
   function updateHoverFeedback() {
     // SMART POINTER EVENTS: Only intercept when hovering lines or in drawing mode
-    const shouldIntercept = overlayState.drawingMode || hoveredDrawing || overlayState.isDragging;
+    const shouldIntercept = unifiedDragState.drawingMode || hoveredDrawing || overlayState.isDragging;
     overlayCanvas.style.pointerEvents = shouldIntercept ? 'auto' : 'none';
     
     // Update cursor based on state
@@ -2455,7 +2723,7 @@
         }
       }
     } else {
-      overlayCanvas.style.cursor = overlayState.drawingMode ? 'crosshair' : 'default';
+      overlayCanvas.style.cursor = unifiedDragState.drawingMode ? 'crosshair' : 'default';
     }
   }
   
@@ -2480,8 +2748,10 @@
       
       overlayState.isDragging = false;
       overlayState.dragStart = { x, y };
-      overlayState.dragOffset = { x: 0, y: 0 };
-      overlayState.dragTarget = drawing;
+      unifiedDragState.startX = x;
+      unifiedDragState.startY = y;
+      unifiedDragState.dragTarget = drawing;
+      unifiedDragState.dragType = 'overlay-' + (drawing?.type || 'unknown');
       
       // For trendlines, determine if we're near an endpoint for resizing
       if (drawing.type === 'trendline') {
@@ -2707,65 +2977,258 @@
     return candleSeries.priceToCoordinate(price);
   }
 
-  // ===== OVERLAY DRAWING FUNCTIONS =====
+  // ===== OVERLAY DRAWING PERSISTENCE SYSTEM =====
+  function getOverlayStorageKey(symbol, timeframe) {
+    return `eod-overlay-drawings-${symbol}-${timeframe}`;
+  }
+  
+  function getDrawingsForSymbol(symbol, timeframe) {
+    const key = getOverlayStorageKey(symbol, timeframe);
+    const cacheKey = `${symbol}-${timeframe}`;
+    
+    // Return cached version if available
+    if (overlayDrawings[cacheKey]) {
+      return overlayDrawings[cacheKey];
+    }
+    
+    // Load from localStorage
+    try {
+      const stored = localStorage.getItem(key);
+      const drawings = stored ? JSON.parse(stored) : { levels: [], trendlines: [] };
+      
+      // Ensure proper structure
+      if (!drawings.levels) drawings.levels = [];
+      if (!drawings.trendlines) drawings.trendlines = [];
+      
+      // Cache for performance
+      overlayDrawings[cacheKey] = drawings;
+      return drawings;
+    } catch (error) {
+      console.warn('[EOD] Error loading overlay drawings:', error);
+      const defaultDrawings = { levels: [], trendlines: [] };
+      overlayDrawings[cacheKey] = defaultDrawings;
+      return defaultDrawings;
+    }
+  }
+  
+  function saveDrawingsForSymbol(symbol, timeframe, drawings) {
+    const key = getOverlayStorageKey(symbol, timeframe);
+    const cacheKey = `${symbol}-${timeframe}`;
+    
+    try {
+      // Update cache
+      overlayDrawings[cacheKey] = drawings;
+      
+      // Persist to localStorage
+      localStorage.setItem(key, JSON.stringify(drawings));
+      
+      console.log(`[EOD] 💾 Overlay drawings saved for ${symbol} ${timeframe}:`, {
+        levels: drawings.levels.length,
+        trendlines: drawings.trendlines.length
+      });
+    } catch (error) {
+      console.error('[EOD] Error saving overlay drawings:', error);
+    }
+  }
+  
   function overlayAddLevel(price) {
     const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
-    drawings.levels.push({ price });
+    const newLevel = {
+      id: 'overlay-level-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+      price: price,
+      color: '#60a5fa',
+      created: Date.now()
+    };
+    
+    drawings.levels.push(newLevel);
+    saveDrawingsForSymbol(currentSymbol, currentTimeframe, drawings);
     renderOverlay();
+    
     console.log('[EOD] ✅ Overlay level added at', price.toFixed(2));
+    return newLevel;
   }
 
-  function overlayAddTrendline(x1, y1, x2, y2) {
-    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);  
-    drawings.trendlines.push({ 
-      x1Logical: x1, 
-      y1Price: y1, 
-      x2Logical: x2, 
-      y2Price: y2 
-    });
+  function overlayAddTrendline(time1, price1, time2, price2) {
+    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
+    const newTrendline = {
+      id: 'overlay-trendline-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+      startTime: time1,
+      startPrice: price1,
+      endTime: time2,
+      endPrice: price2,
+      color: '#f59e0b',
+      created: Date.now()
+    };
+    
+    drawings.trendlines.push(newTrendline);
+    saveDrawingsForSymbol(currentSymbol, currentTimeframe, drawings);
     renderOverlay();
+    
     console.log('[EOD] ✅ Overlay trendline added');
+    return newTrendline;
+  }
+  
+  function overlayUpdateDrawing(symbol, timeframe, drawingId, updateData) {
+    const drawings = getDrawingsForSymbol(symbol, timeframe);
+    let updated = false;
+    
+    // Update level
+    const levelIndex = drawings.levels.findIndex(l => l.id === drawingId);
+    if (levelIndex >= 0) {
+      Object.assign(drawings.levels[levelIndex], updateData);
+      updated = true;
+    }
+    
+    // Update trendline
+    const trendlineIndex = drawings.trendlines.findIndex(t => t.id === drawingId);
+    if (trendlineIndex >= 0) {
+      Object.assign(drawings.trendlines[trendlineIndex], updateData);
+      updated = true;
+    }
+    
+    if (updated) {
+      saveDrawingsForSymbol(symbol, timeframe, drawings);
+      if (symbol === currentSymbol && timeframe === currentTimeframe) {
+        renderOverlay();
+      }
+      console.log('[EOD] ✅ Overlay drawing updated:', drawingId);
+    }
+    
+    return updated;
+  }
+  
+  function overlayDeleteDrawing(symbol, timeframe, drawingId) {
+    const drawings = getDrawingsForSymbol(symbol, timeframe);
+    let deleted = false;
+    
+    // Delete level
+    const levelIndex = drawings.levels.findIndex(l => l.id === drawingId);
+    if (levelIndex >= 0) {
+      drawings.levels.splice(levelIndex, 1);
+      deleted = true;
+    }
+    
+    // Delete trendline
+    const trendlineIndex = drawings.trendlines.findIndex(t => t.id === drawingId);
+    if (trendlineIndex >= 0) {
+      drawings.trendlines.splice(trendlineIndex, 1);
+      deleted = true;
+    }
+    
+    if (deleted) {
+      saveDrawingsForSymbol(symbol, timeframe, drawings);
+      if (symbol === currentSymbol && timeframe === currentTimeframe) {
+        renderOverlay();
+      }
+      console.log('[EOD] ✅ Overlay drawing deleted:', drawingId);
+    }
+    
+    return deleted;
   }
 
-  // ===== OVERLAY RENDERING SYSTEM =====
-  function renderOverlay() {
+  // ===== OVERLAY RENDERING SYSTEM WITH DPI AWARENESS =====
+  function initializeOverlayCanvas() {
+    overlayCanvas = document.getElementById('drawing-overlay');
+    if (!overlayCanvas) {
+      console.error('[EOD] Drawing overlay canvas not found');
+      return false;
+    }
+    
+    overlayCtx = overlayCanvas.getContext('2d');
+    if (!overlayCtx) {
+      console.error('[EOD] Could not get overlay canvas context');
+      return false;
+    }
+    
+    // Set up DPI-aware canvas sizing
+    setupOverlayCanvasDPI();
+    
+    console.log('[EOD] ✅ Overlay canvas initialized with DPI awareness');
+    return true;
+  }
+  
+  function setupOverlayCanvasDPI() {
     if (!overlayCanvas || !overlayCtx) return;
     
+    const chartContainer = document.getElementById('chart');
+    const rect = chartContainer.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    
+    // Set canvas size in CSS pixels
+    overlayCanvas.style.width = rect.width + 'px';
+    overlayCanvas.style.height = rect.height + 'px';
+    
+    // Set actual canvas size in memory (scaled for DPI)
+    overlayCanvas.width = rect.width * dpr;
+    overlayCanvas.height = rect.height * dpr;
+    
+    // Scale the drawing context for DPI
+    overlayCtx.scale(dpr, dpr);
+    
+    console.log(`[EOD] 📐 Canvas DPI setup: ${rect.width}x${rect.height} CSS, ${overlayCanvas.width}x${overlayCanvas.height} actual, DPR: ${dpr}`);
+  }
+  
+  let renderOverlayThrottle = null;
+  function renderOverlay() {
+    // Throttle overlay rendering for performance
+    if (renderOverlayThrottle) {
+      clearTimeout(renderOverlayThrottle);
+    }
+    
+    renderOverlayThrottle = setTimeout(() => {
+      renderOverlayImmediate();
+    }, 16); // ~60fps
+  }
+  
+  function renderOverlayImmediate() {
+    if (!overlayCanvas || !overlayCtx) {
+      if (!initializeOverlayCanvas()) return;
+    }
+    
+    // Get canvas dimensions
+    const chartContainer = document.getElementById('chart');
+    const rect = chartContainer.getBoundingClientRect();
+    
     // Clear canvas
-    const rect = overlayCanvas.getBoundingClientRect();
     overlayCtx.clearRect(0, 0, rect.width, rect.height);
     
     // Get current drawings
     const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
     
     // Render levels
-    overlayCtx.strokeStyle = '#60a5fa';
-    overlayCtx.lineWidth = 2;
     drawings.levels.forEach(level => {
-      const y = priceToChart(level.price);
+      const y = safePriceToChart(level.price);
       if (y !== null && !isNaN(y)) {
+        overlayCtx.save();
+        overlayCtx.strokeStyle = level.color || '#60a5fa';
+        overlayCtx.lineWidth = 2;
+        overlayCtx.setLineDash([]);
         overlayCtx.beginPath();
         overlayCtx.moveTo(0, y);
         overlayCtx.lineTo(rect.width, y);
         overlayCtx.stroke();
+        overlayCtx.restore();
       }
     });
     
     // Render trendlines
-    overlayCtx.strokeStyle = '#f59e0b';
-    overlayCtx.lineWidth = 2;
     drawings.trendlines.forEach(trendline => {
-      const x1 = logicalToChart(trendline.x1Logical);
-      const y1 = priceToChart(trendline.y1Price);
-      const x2 = logicalToChart(trendline.x2Logical);
-      const y2 = priceToChart(trendline.y2Price);
+      const x1 = safeLogicalToChart(safeChartToLogical(chart.timeScale().timeToCoordinate(trendline.startTime)));
+      const y1 = safePriceToChart(trendline.startPrice);
+      const x2 = safeLogicalToChart(safeChartToLogical(chart.timeScale().timeToCoordinate(trendline.endTime)));
+      const y2 = safePriceToChart(trendline.endPrice);
       
       if (x1 !== null && y1 !== null && x2 !== null && y2 !== null &&
           !isNaN(x1) && !isNaN(y1) && !isNaN(x2) && !isNaN(y2)) {
+        overlayCtx.save();
+        overlayCtx.strokeStyle = trendline.color || '#f59e0b';
+        overlayCtx.lineWidth = 2;
+        overlayCtx.setLineDash([]);
         overlayCtx.beginPath();
         overlayCtx.moveTo(x1, y1);
         overlayCtx.lineTo(x2, y2);
         overlayCtx.stroke();
+        overlayCtx.restore();
       }
     });
     
@@ -2776,35 +3239,50 @@
   }
 
   function renderSelectionHandles(selectedObj) {
+    if (!overlayCtx) return;
+    
+    overlayCtx.save();
     overlayCtx.fillStyle = '#ffffff';
-    overlayCtx.strokeStyle = '#000000';
-    overlayCtx.lineWidth = 1;
+    overlayCtx.strokeStyle = '#3b82f6';
+    overlayCtx.lineWidth = 2;
     
     const drawing = selectedObj.drawing;
     
     if (selectedObj.type === 'level') {
-      const y = priceToChart(drawing.price);
+      const y = safePriceToChart(drawing.price);
       if (y !== null && !isNaN(y)) {
-        const rect = overlayCanvas.getBoundingClientRect();
+        const chartContainer = document.getElementById('chart');
+        const rect = chartContainer.getBoundingClientRect();
         const x = rect.width / 2;
-        overlayCtx.fillRect(x - 4, y - 4, 8, 8);
-        overlayCtx.strokeRect(x - 4, y - 4, 8, 8);
+        
+        // Draw selection handle
+        overlayCtx.beginPath();
+        overlayCtx.arc(x, y, 6, 0, 2 * Math.PI);
+        overlayCtx.fill();
+        overlayCtx.stroke();
       }
     } else if (selectedObj.type === 'trendline') {
-      const x1 = logicalToChart(drawing.x1Logical);
-      const y1 = priceToChart(drawing.y1Price);
-      const x2 = logicalToChart(drawing.x2Logical);
-      const y2 = priceToChart(drawing.y2Price);
+      const x1 = chart.timeScale().timeToCoordinate(drawing.startTime);
+      const y1 = safePriceToChart(drawing.startPrice);
+      const x2 = chart.timeScale().timeToCoordinate(drawing.endTime);
+      const y2 = safePriceToChart(drawing.endPrice);
       
       if (x1 !== null && y1 !== null && x2 !== null && y2 !== null &&
           !isNaN(x1) && !isNaN(y1) && !isNaN(x2) && !isNaN(y2)) {
         // Draw handles at both endpoints
-        overlayCtx.fillRect(x1 - 4, y1 - 4, 8, 8);
-        overlayCtx.strokeRect(x1 - 4, y1 - 4, 8, 8);
-        overlayCtx.fillRect(x2 - 4, y2 - 4, 8, 8);
-        overlayCtx.strokeRect(x2 - 4, y2 - 4, 8, 8);
+        overlayCtx.beginPath();
+        overlayCtx.arc(x1, y1, 6, 0, 2 * Math.PI);
+        overlayCtx.fill();
+        overlayCtx.stroke();
+        
+        overlayCtx.beginPath();
+        overlayCtx.arc(x2, y2, 6, 0, 2 * Math.PI);
+        overlayCtx.fill();
+        overlayCtx.stroke();
       }
     }
+    
+    overlayCtx.restore();
   }
 
   // ---- Indicator calculations
@@ -2954,7 +3432,7 @@
     }));
   }
 
-  // Helper functions for per-timeframe storage
+  // Helper functions for per-timeframe storage (for legacy chart-based drawings)
   function getStorageKey(symbol, timeframe, dataType) {
     return `eod-${dataType}-${symbol}-${timeframe}`;
   }
@@ -3075,6 +3553,9 @@
       drawLevelsOnChart();
       updateTrendlinesDisplay();
       drawTrendlinesOnChart();
+      
+      // Load and render overlay drawings for this symbol/timeframe
+      renderOverlay();
       
       // Update status to connected
       $('#status-dot').className = 'status-dot status-connected';
@@ -3790,7 +4271,7 @@
         if (price !== null && !isNaN(price) && isFinite(price) && 
             time !== null && time !== undefined && isFinite(time)) {
           // Check if clicking on existing line for alert setup (when not in drawing mode)
-          if (!drawingMode) {
+          if (!unifiedDragState.drawingMode) {
             const clickedLine = findLineNearClick(param.point.x, param.point.y);
             if (clickedLine) {
               // Select line for editing
@@ -3808,15 +4289,15 @@
           }
           
           // Handle drawing modes
-          if (drawingMode && drawingTool === 'level') {
+          if (unifiedDragState.drawingMode && unifiedDragState.drawingTool === 'level') {
             addLevel(price);
             log(`Level added at ${price.toFixed(2)}`);
             // Auto-disable drawing mode after completing level
-            drawingMode = false;
+            unifiedDragState.drawingMode = false;
             $('#level-tool').classList.remove('active');
             document.body.classList.remove('drawing-mode');
-            console.log('[EOD] ✅ Drawing mode disabled after level completion - drawingMode now:', drawingMode);
-          } else if (drawingMode && drawingTool === 'trendline') {
+            console.log('[EOD] ✅ Drawing mode disabled after level completion - drawingMode now:', unifiedDragState.drawingMode);
+          } else if (unifiedDragState.drawingMode && unifiedDragState.drawingTool === 'trendline') {
             if (!trendlineStart) {
               // First click: set start point
               trendlineStart = { time, price };
@@ -3828,11 +4309,11 @@
               addTrendline(trendlineStart.time, trendlineStart.price, time, price);
               log(`Trendline added from ${trendlineStart.price.toFixed(2)} to ${price.toFixed(2)}`);
               // Auto-disable drawing mode after completing trendline
-              drawingMode = false;
+              unifiedDragState.drawingMode = false;
               $('#trendline-tool').classList.remove('active');
               document.body.classList.remove('drawing-mode');
               trendlineStart = null;
-              console.log('[EOD] ✅ Drawing mode disabled after trendline completion - drawingMode now:', drawingMode);
+              console.log('[EOD] ✅ Drawing mode disabled after trendline completion - drawingMode now:', unifiedDragState.drawingMode);
             }
           }
         } else {
@@ -3852,7 +4333,7 @@
 
     // Keep mousemove only for trendline preview (non-performance critical)
     chartContainer.addEventListener('mousemove', (event) => {
-      if (drawingMode && drawingTool === 'trendline' && trendlineStart && previewTrendline) {
+      if (unifiedDragState.drawingMode && unifiedDragState.drawingTool === 'trendline' && unifiedDragState.trendlineStart && previewTrendline) {
         // Throttle preview updates for better performance (max 60fps)
         if (previewUpdateThrottle) {
           clearTimeout(previewUpdateThrottle);
@@ -4575,17 +5056,17 @@
 
   // ===== OVERLAY DRAWING TOOL BUTTONS =====
   $('#level-tool').addEventListener('click', () => {
-    if (overlayState.drawingTool === 'level' && overlayState.drawingMode) {
+    if (unifiedDragState.drawingTool === 'level' && unifiedDragState.drawingMode) {
       // Turn off drawing mode
-      overlayState.drawingMode = false;
+      unifiedDragState.drawingMode = false;
       $('#level-tool').classList.remove('active');
       document.body.classList.remove('drawing-mode');
       log('Drawing mode off');
     } else {
       // Switch to level tool
-      overlayState.drawingTool = 'level';
-      overlayState.drawingMode = true;
-      overlayState.trendlineStart = null;
+      unifiedDragState.drawingTool = 'level';
+      unifiedDragState.drawingMode = true;
+      unifiedDragState.trendlineStart = null;
       $('#level-tool').classList.add('active');
       $('#trendline-tool').classList.remove('active');
       document.body.classList.add('drawing-mode');
@@ -4594,18 +5075,18 @@
   });
 
   $('#trendline-tool').addEventListener('click', () => {
-    if (overlayState.drawingTool === 'trendline' && overlayState.drawingMode) {
+    if (unifiedDragState.drawingTool === 'trendline' && unifiedDragState.drawingMode) {
       // Turn off drawing mode
-      overlayState.drawingMode = false;
-      overlayState.trendlineStart = null;
+      unifiedDragState.drawingMode = false;
+      unifiedDragState.trendlineStart = null;
       $('#trendline-tool').classList.remove('active');
       document.body.classList.remove('drawing-mode');
       log('Drawing mode off');
     } else {
       // Switch to trendline tool
-      overlayState.drawingTool = 'trendline';
-      overlayState.drawingMode = true;
-      overlayState.trendlineStart = null;
+      unifiedDragState.drawingTool = 'trendline';
+      unifiedDragState.drawingMode = true;
+      unifiedDragState.trendlineStart = null;
       $('#trendline-tool').classList.add('active');
       $('#level-tool').classList.remove('active');
       document.body.classList.add('drawing-mode');
@@ -4617,7 +5098,15 @@
     if (confirm('Clear all levels and trendlines for ' + currentSymbol + '?')) {
       clearAllLevels();
       clearAllTrendlines();
-      log('All levels and trendlines cleared');
+      
+      // Also clear overlay drawings
+      const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
+      drawings.levels = [];
+      drawings.trendlines = [];
+      saveDrawingsForSymbol(currentSymbol, currentTimeframe, drawings);
+      renderOverlay();
+      
+      log('All levels, trendlines, and overlay drawings cleared');
     }
   });
 
