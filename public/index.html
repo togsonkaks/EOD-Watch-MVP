@@ -125,125 +125,6 @@
       #board { display:none; }
     }
 
-    /* Alert Modal Styles */
-    .alert-modal {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.8);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      z-index: 1000;
-    }
-
-    .alert-modal-content {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 0;
-      min-width: 320px;
-      max-width: 420px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    }
-
-    .alert-modal-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .alert-modal-header h3 {
-      margin: 0;
-      color: var(--text);
-      font-size: 16px;
-      font-weight: 600;
-    }
-
-    .alert-modal-close {
-      background: none;
-      border: none;
-      color: var(--muted);
-      font-size: 20px;
-      cursor: pointer;
-      padding: 4px;
-      border-radius: 4px;
-      line-height: 1;
-    }
-
-    .alert-modal-close:hover {
-      background: var(--border);
-      color: var(--text);
-    }
-
-    .alert-modal-body {
-      padding: 20px;
-    }
-
-    .alert-info {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 16px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .alert-options {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .alert-btn {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 14px 16px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--bg);
-      color: var(--text);
-      cursor: pointer;
-      transition: all 0.2s ease;
-      font-size: 14px;
-      width: 100%;
-    }
-
-    .alert-btn:hover {
-      border-color: var(--accent);
-      background: rgba(59, 130, 246, 0.1);
-    }
-
-    .alert-btn-green:hover {
-      border-color: var(--good);
-      background: rgba(74, 222, 128, 0.1);
-    }
-
-    .alert-btn-red:hover {
-      border-color: var(--bad);
-      background: rgba(239, 68, 68, 0.1);
-    }
-
-    .alert-icon {
-      font-size: 16px;
-      font-weight: bold;
-    }
-
-    .alert-text {
-      flex: 1;
-      font-weight: 500;
-    }
-
-    .alert-price {
-      font-weight: 600;
-      color: var(--accent);
-    }
   </style>
 </head>
 <body>
@@ -375,34 +256,6 @@
     </div>
   </div>
 
-  <!-- Alert Setup Modal -->
-  <div id="alert-modal" class="alert-modal" style="display: none;">
-    <div class="alert-modal-content">
-      <div class="alert-modal-header">
-        <h3 id="alert-modal-title">Set Alert</h3>
-        <span class="alert-modal-close" onclick="closeAlertModal()">&times;</span>
-      </div>
-      <div class="alert-modal-body">
-        <div id="alert-line-info" class="alert-info"></div>
-        <div class="alert-options">
-          <div class="alert-option">
-            <button id="alert-above-btn" class="alert-btn alert-btn-green" onclick="setAlertDirection('above')">
-              <span class="alert-icon">▲</span>
-              <span class="alert-text">Close Above</span>
-              <span id="alert-above-price" class="alert-price"></span>
-            </button>
-          </div>
-          <div class="alert-option">
-            <button id="alert-below-btn" class="alert-btn alert-btn-red" onclick="setAlertDirection('below')">
-              <span class="alert-icon">▼</span>
-              <span class="alert-text">Close Below</span>
-              <span id="alert-below-price" class="alert-price"></span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
 
 <script>
 (function () {
@@ -731,33 +584,22 @@
         if (trendlineHit) {
           const t = trendSeriesById.get(trendlineHit.id)?.data;
           if (t) {
-            // Calculate current price on trendline at click time
-            const trendPrice = calculateTrendlinePrice(t, time);
-            openAlertModal({
-              type: 'trendline',
-              id: trendlineHit.id,
-              price: trendPrice,
-              trendlineData: t
-            });
-            log(`Alert setup for trendline`);
+            // Select trendline for editing
+            selectLine({ type: 'trendline', id: trendlineHit.id, data: t });
+            log(`Selected trendline for editing`);
           }
         } else if (levelHit) {
           const level = levelLineById.get(levelHit.id)?.data;
           if (level) {
-            openAlertModal({
-              type: 'level',
-              id: levelHit.id,
-              price: level.price,
-              trendlineData: null
-            });
-            log(`Alert setup for level at $${level.price.toFixed(2)}`);
+            // Select level for editing
+            selectLine({ type: 'level', id: levelHit.id, data: level });
+            log(`Selected level at $${level.price.toFixed(2)} for editing`);
           }
         } else {
           // Check for indicator clicks
           const indicatorClick = detectIndicatorClick(px, py);
           if (indicatorClick) {
-            openAlertModal(indicatorClick);
-            log(`Alert setup for ${indicatorClick.type}`);
+            log(`Clicked on ${indicatorClick.type} indicator`);
           }
         }
       }
@@ -1787,21 +1629,15 @@
           if (!drawingMode) {
             const clickedLine = findLineNearClick(param.point.x, param.point.y);
             if (clickedLine) {
-              // Show alert modal instead of just selecting
-              openAlertModal({
-                type: clickedLine.type,
-                id: clickedLine.data.id,
-                price: clickedLine.data.price,
-                trendlineData: clickedLine.data
-              });
-              log(`Alert setup for ${clickedLine.type} line`);
+              // Select line for editing
+              selectLine(clickedLine);
+              log(`Selected ${clickedLine.type} line for editing`);
               return;
             } else {
               // Check if clicking on indicators (EMA or Bollinger Bands)
               const indicatorClick = detectIndicatorClick(param.point.x, param.point.y);
               if (indicatorClick) {
-                openAlertModal(indicatorClick);
-                log(`Alert setup for ${indicatorClick.type}`);
+                log(`Clicked on ${indicatorClick.type} indicator`);
                 return;
               }
               
@@ -2942,7 +2778,7 @@
     // Bootstrap 200 seed minutes so EMA/BB have data
     testBars = [baseFrom];
     for (let i=0;i<220;i++) testBars.push(genNextMinute(testBars.at(-1), 18));
-    candle.setData(testBars);
+    candleSeries.setData(testBars);
     emaSeries.setData(emaFromBars(testBars, 200));
     const bb = bbFromBars(testBars, 20, 2);
     bbUpperSeries.setData(bb.upper);
@@ -2956,7 +2792,7 @@
   function testTick() {
     const next = genNextMinute(testBars.at(-1), 22);
     testBars.push(next);
-    candle.update(next);
+    candleSeries.update(next);
 
     // Update indicators incrementally
     const emaArr = emaFromBars(testBars, 200);     // fine for test; optimize later if needed
@@ -3094,126 +2930,6 @@
 
   // removeSymbol no longer needs to be global (using event delegation)
 
-  // ================================================
-  // ALERT MODAL SYSTEM
-  // ================================================
-  
-  let currentAlertLine = null; // Store the line/indicator being configured
-  
-  // Open alert modal for a clicked line or indicator
-  function openAlertModal(lineInfo) {
-    currentAlertLine = lineInfo;
-    const modal = document.getElementById('alert-modal');
-    const title = document.getElementById('alert-modal-title');
-    const info = document.getElementById('alert-line-info');
-    const abovePrice = document.getElementById('alert-above-price');
-    const belowPrice = document.getElementById('alert-below-price');
-    
-    // Set modal title based on line type
-    if (lineInfo.type === 'level') {
-      title.textContent = `Alert for Level Line`;
-      info.textContent = `Symbol: ${currentSymbol} | Level: $${lineInfo.price.toFixed(2)}`;
-      abovePrice.textContent = `$${lineInfo.price.toFixed(2)}`;
-      belowPrice.textContent = `$${lineInfo.price.toFixed(2)}`;
-    } else if (lineInfo.type === 'trendline') {
-      title.textContent = `Alert for Trendline`;
-      info.textContent = `Symbol: ${currentSymbol} | Dynamic trendline price`;
-      abovePrice.textContent = 'trend line';
-      belowPrice.textContent = 'trend line';
-    } else if (lineInfo.type === 'ema') {
-      title.textContent = `Alert for EMA(200)`;
-      info.textContent = `Symbol: ${currentSymbol} | EMA(200) current value`;
-      abovePrice.textContent = 'EMA(200)';
-      belowPrice.textContent = 'EMA(200)';
-    } else if (lineInfo.type === 'bb_upper') {
-      title.textContent = `Alert for Bollinger Band Upper`;
-      info.textContent = `Symbol: ${currentSymbol} | Upper Bollinger Band`;
-      abovePrice.textContent = 'upper band';
-      belowPrice.textContent = 'upper band';
-    } else if (lineInfo.type === 'bb_lower') {
-      title.textContent = `Alert for Bollinger Band Lower`;
-      info.textContent = `Symbol: ${currentSymbol} | Lower Bollinger Band`;
-      abovePrice.textContent = 'lower band';
-      belowPrice.textContent = 'lower band';
-    }
-    
-    modal.style.display = 'flex';
-  }
-  
-  // Close alert modal
-  window.closeAlertModal = function() {
-    document.getElementById('alert-modal').style.display = 'none';
-    currentAlertLine = null;
-  }
-  
-  // Set alert direction (above/below)
-  window.setAlertDirection = function(direction) {
-    if (!currentAlertLine) return;
-    
-    const alertConfig = {
-      symbol: currentSymbol,
-      timeframe: currentTimeframe,
-      lineType: currentAlertLine.type,
-      lineId: currentAlertLine.id || null,
-      direction: direction, // 'above' or 'below'
-      price: currentAlertLine.price || null,
-      trendlineData: currentAlertLine.trendlineData || null,
-      created: Date.now()
-    };
-    
-    // Store alert configuration (not triggering yet)
-    storeAlertConfig(alertConfig);
-    
-    log(`Alert set: ${currentSymbol} close ${direction} ${currentAlertLine.type === 'level' ? '$' + currentAlertLine.price.toFixed(2) : currentAlertLine.type}`);
-    closeAlertModal();
-  }
-  
-  // Store alert configuration in localStorage 
-  function storeAlertConfig(config) {
-    const alertsKey = 'eod-alert-configs';
-    const existingAlerts = JSON.parse(localStorage.getItem(alertsKey) || '[]');
-    
-    // Remove any existing alert for same line/indicator
-    const filteredAlerts = existingAlerts.filter(alert => 
-      !(alert.symbol === config.symbol && 
-        alert.timeframe === config.timeframe &&
-        alert.lineType === config.lineType &&
-        alert.lineId === config.lineId)
-    );
-    
-    filteredAlerts.push(config);
-    localStorage.setItem(alertsKey, JSON.stringify(filteredAlerts));
-    
-    // Show confirmation
-    updateAlertsDisplay();
-  }
-  
-  // Show stored alerts (for debugging - will enhance later)
-  function updateAlertsDisplay() {
-    const alertsKey = 'eod-alert-configs';
-    const alerts = JSON.parse(localStorage.getItem(alertsKey) || '[]');
-    console.log('[ALERTS] Stored configurations:', alerts);
-  }
-  
-  // Helper function to calculate price on trendline at specific time
-  function calculateTrendlinePrice(trendlineData, time) {
-    if (!trendlineData || !time) return 0;
-    
-    const timeDelta = trendlineData.endTime - trendlineData.startTime;
-    const priceDelta = trendlineData.endPrice - trendlineData.startPrice;
-    
-    if (timeDelta === 0) return trendlineData.startPrice;
-    
-    const timeRatio = (time - trendlineData.startTime) / timeDelta;
-    return trendlineData.startPrice + (priceDelta * timeRatio);
-  }
-
-  // Close modal on outside click
-  document.getElementById('alert-modal').addEventListener('click', function(e) {
-    if (e.target === this) {
-      closeAlertModal();
-    }
-  });
 
 })();
 </script>
