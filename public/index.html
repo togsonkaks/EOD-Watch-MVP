@@ -2136,7 +2136,12 @@
 
   function overlayAddTrendline(x1, y1, x2, y2) {
     const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);  
-    drawings.trendlines.push({ x1, y1, x2, y2 });
+    drawings.trendlines.push({ 
+      x1Logical: x1, 
+      y1Price: y1, 
+      x2Logical: x2, 
+      y2Price: y2 
+    });
     renderOverlay();
     console.log('[EOD] ✅ Overlay trendline added');
   }
