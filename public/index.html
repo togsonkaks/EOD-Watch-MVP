@@ -1612,7 +1612,7 @@
   function freezeDuringDrag(on) {
     chart.applyOptions({
       crosshair: { mode: on ? LightweightCharts.CrosshairMode.Hidden : LightweightCharts.CrosshairMode.Magnet },
-      rightPriceScale: { autoScale: !on }
+      rightPriceScale: { autoScale: false }  // Never re-enable auto-scaling to prevent snap-back
     });
   }
 
@@ -2242,8 +2242,35 @@
     autoSize: true,
     layout: { background: { color: '#0e1a24' }, textColor: '#cbd5e1' },
     grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
-    rightPriceScale: { borderColor: '#334155' },
-    timeScale: { borderColor: '#334155' }
+    rightPriceScale: { 
+      borderColor: '#334155',
+      autoScale: false,  // Disable auto-scaling to prevent snap-back
+      scaleMargins: { top: 0.1, bottom: 0.1 },  // Allow manual price range control
+      visible: true
+    },
+    timeScale: { 
+      borderColor: '#334155',
+      fixLeftEdge: false,   // Allow unlimited panning left
+      fixRightEdge: false,  // Allow unlimited panning right
+      lockVisibleTimeRangeOnResize: true,  // Maintain user's viewport on resize
+      rightBarStaysOnScroll: true,  // Keep right bar position during scroll
+      shiftVisibleRangeOnNewBar: false  // Don't auto-shift viewport for new bars
+    },
+    handleScroll: {
+      mouseWheel: true,     // Enable mouse wheel zoom
+      pressedMouseMove: true,  // Enable drag panning
+      horzTouchDrag: true,  // Enable horizontal touch drag
+      vertTouchDrag: true   // Enable vertical touch drag
+    },
+    handleScale: {
+      mouseWheel: true,     // Enable mouse wheel scaling
+      pinch: true,          // Enable pinch zoom on touch devices
+      axisPressedMouseMove: {
+        time: true,         // Enable time axis drag scaling
+        price: true         // Enable price axis drag scaling
+      },
+      axisDoubleClickReset: false  // Disable double-click auto-reset
+    }
   });
   const candleSeries = chart.addCandlestickSeries();
   // indicators
@@ -3646,7 +3673,7 @@
         bbLowerSeries.setData([]);
       }
       
-      chart.timeScale().fitContent();
+      // REMOVED: chart.timeScale().fitContent(); - Causes snap-back behavior, let users control viewport manually
       currentSymbol = sym;
       currentTimeframe = timeframe;
       localStorage.setItem('eod-current-symbol', sym);
@@ -5565,7 +5592,7 @@
     bbUpperSeries.setData(bb.upper);
     bbMiddleSeries.setData(bb.middle);
     bbLowerSeries.setData(bb.lower);
-    chart.timeScale().fitContent();
+    // REMOVED: chart.timeScale().fitContent(); - Causes snap-back behavior, let users control viewport manually  
     log('Test mode initialized with synthetic 1-minute bars');
   }
 
