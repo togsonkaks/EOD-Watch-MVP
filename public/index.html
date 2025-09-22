@@ -2460,13 +2460,13 @@
       const y = e.clientY - rect.top;
       
       // Calculate movement since drag start
-      const deltaX = x - overlayState.dragStart.x;
-      const deltaY = y - overlayState.dragStart.y;
+      const deltaX = x - unifiedDragState.pixel.startX;
+      const deltaY = y - unifiedDragState.pixel.startY;
       const totalMovement = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
       
       // Activate drag mode if movement exceeds threshold
-      if (!overlayState.isDragging && totalMovement > 5) {
-        overlayState.isDragging = true;
+      if (!unifiedDragState.isDragging && totalMovement > 5) {
+        unifiedDragState.isDragging = true;
         console.log('[EOD] 🎯 Overlay drag started for', unifiedDragState.dragTarget.type, 'mode:', unifiedDragState.dragMode);
         
         // Disable chart interactions during drag
@@ -2488,7 +2488,7 @@
         });
       }
       
-      if (overlayState.isDragging) {
+      if (unifiedDragState.isDragging) {
         e.stopImmediatePropagation();
         e.preventDefault();
         
@@ -2500,7 +2500,7 @@
     
     // Mouse up handler to complete drag
     overlayCanvas.addEventListener('pointerup', (e) => {
-      if (overlayState.isDragging) {
+      if (unifiedDragState.isDragging) {
         console.log('[EOD] 🎯 Overlay drag completed for', unifiedDragState.dragTarget.type);
         
         // Save changes to storage
@@ -2538,7 +2538,7 @@
     
     // Handle pointer leave to cleanup drag state
     overlayCanvas.addEventListener('pointerleave', (e) => {
-      if (overlayState.isDragging) {
+      if (unifiedDragState.isDragging) {
         // Complete the drag on leave
         saveDrawingsAfterDrag();
         chart.applyOptions({ 
@@ -2592,15 +2592,15 @@
       const price = chartToPrice(y);
       
       if (logical !== null && price !== null && !isNaN(logical) && !isNaN(price)) {
-        if (overlayState.dragMode === 'move') {
+        if (unifiedDragState.mode === 'move') {
           // Move entire trendline
-          const deltaLogical = logical - chartToLogical(overlayState.dragStart.x);
-          const deltaPrice = price - chartToPrice(overlayState.dragStart.y);
+          const deltaLogical = logical - chartToLogical(unifiedDragState.pixel.startX);
+          const deltaPrice = price - chartToPrice(unifiedDragState.pixel.startY);
           
           if (!isNaN(deltaLogical) && !isNaN(deltaPrice)) {
             // Store original positions if not already stored
-            if (!overlayState.originalTrendline) {
-              overlayState.originalTrendline = {
+            if (!unifiedDragState.originalTrendline) {
+              unifiedDragState.originalTrendline = {
                 x1Logical: drawing.x1Logical,
                 y1Price: drawing.y1Price,
                 x2Logical: drawing.x2Logical,
@@ -2608,19 +2608,19 @@
               };
             }
             
-            drawings.trendlines[index].x1Logical = overlayState.originalTrendline.x1Logical + deltaLogical;
-            drawings.trendlines[index].y1Price = overlayState.originalTrendline.y1Price + deltaPrice;
-            drawings.trendlines[index].x2Logical = overlayState.originalTrendline.x2Logical + deltaLogical;
-            drawings.trendlines[index].y2Price = overlayState.originalTrendline.y2Price + deltaPrice;
+            drawings.trendlines[index].x1Logical = unifiedDragState.originalTrendline.x1Logical + deltaLogical;
+            drawings.trendlines[index].y1Price = unifiedDragState.originalTrendline.y1Price + deltaPrice;
+            drawings.trendlines[index].x2Logical = unifiedDragState.originalTrendline.x2Logical + deltaLogical;
+            drawings.trendlines[index].y2Price = unifiedDragState.originalTrendline.y2Price + deltaPrice;
             
             console.log('[EOD] 🎯 Trendline moved by delta:', deltaLogical.toFixed(1), deltaPrice.toFixed(2));
           }
-        } else if (overlayState.dragMode === 'resize-start') {
+        } else if (unifiedDragState.mode === 'resize-start') {
           // Resize from start point
           drawings.trendlines[index].x1Logical = logical;
           drawings.trendlines[index].y1Price = price;
           console.log('[EOD] 🎯 Trendline start point moved to:', logical.toFixed(1), price.toFixed(2));
-        } else if (overlayState.dragMode === 'resize-end') {
+        } else if (unifiedDragState.mode === 'resize-end') {
           // Resize from end point
           drawings.trendlines[index].x2Logical = logical;
           drawings.trendlines[index].y2Price = price;
@@ -2648,7 +2648,7 @@
     }
     
     // Clear original trendline position cache
-    overlayState.originalTrendline = null;
+    unifiedDragState.originalTrendline = null;
   }
 
   // ===== OVERLAY STORAGE FUNCTIONS =====
@@ -2789,11 +2789,11 @@
   
   function updateHoverFeedback() {
     // SMART POINTER EVENTS: Only intercept when hovering lines or in drawing mode
-    const shouldIntercept = unifiedDragState.drawingMode || hoveredDrawing || overlayState.isDragging;
+    const shouldIntercept = unifiedDragState.drawingMode || hoveredDrawing || unifiedDragState.isDragging;
     overlayCanvas.style.pointerEvents = shouldIntercept ? 'auto' : 'none';
     
     // Update cursor based on state
-    if (overlayState.isDragging) {
+    if (unifiedDragState.isDragging) {
       // Keep drag cursor during drag
       return;
     } else if (hoveredDrawing) {
@@ -2855,8 +2855,9 @@
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       
-      overlayState.isDragging = false;
-      overlayState.dragStart = { x, y };
+      unifiedDragState.isDragging = false;
+      unifiedDragState.pixel.startX = x;
+      unifiedDragState.pixel.startY = y;
       unifiedDragState.startX = x;
       unifiedDragState.startY = y;
       unifiedDragState.dragTarget = drawing;
@@ -2875,19 +2876,19 @@
           const resizeThreshold = 12;
           
           if (startDist <= resizeThreshold) {
-            overlayState.dragMode = 'resize-start';
+            unifiedDragState.mode = 'resize-start';
             overlayCanvas.style.cursor = 'nw-resize';
           } else if (endDist <= resizeThreshold) {
-            overlayState.dragMode = 'resize-end';
+            unifiedDragState.mode = 'resize-end';
             overlayCanvas.style.cursor = 'nw-resize';
           } else {
-            overlayState.dragMode = 'move';
+            unifiedDragState.mode = 'move';
             overlayCanvas.style.cursor = 'move';
           }
         }
       } else {
         // Level - only move up/down
-        overlayState.dragMode = 'move';
+        unifiedDragState.mode = 'move';
         overlayCanvas.style.cursor = 'ns-resize';
       }
       
