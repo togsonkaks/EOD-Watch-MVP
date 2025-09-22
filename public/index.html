@@ -3175,6 +3175,47 @@
     console.log(`[EOD] 📐 Canvas DPI setup: ${rect.width}x${rect.height} CSS, ${overlayCanvas.width}x${overlayCanvas.height} actual, DPR: ${dpr}`);
   }
   
+  // ===== ENHANCED CANVAS SYNCHRONIZATION =====
+  function syncOverlayCanvasDimensions() {
+    if (!overlayCanvas || !overlayCtx) {
+      console.warn('[EOD] 🚨 Cannot sync canvas dimensions - canvas not initialized');
+      return;
+    }
+    
+    const chartContainer = document.getElementById('chart');
+    if (!chartContainer) {
+      console.warn('[EOD] 🚨 Chart container not found');
+      return;
+    }
+    
+    const rect = chartContainer.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    
+    // Check if dimensions have actually changed to avoid unnecessary redraws
+    const currentWidth = parseFloat(overlayCanvas.style.width) || 0;
+    const currentHeight = parseFloat(overlayCanvas.style.height) || 0;
+    
+    if (Math.abs(currentWidth - rect.width) < 1 && Math.abs(currentHeight - rect.height) < 1) {
+      return; // No significant change, skip update
+    }
+    
+    console.log(`[EOD] 📐 Syncing canvas dimensions: ${rect.width}x${rect.height}`);
+    
+    // Reset transform to prevent accumulation
+    overlayCtx.setTransform(1, 0, 0, 1, 0, 0);
+    
+    // Update canvas dimensions
+    overlayCanvas.style.width = rect.width + 'px';
+    overlayCanvas.style.height = rect.height + 'px';
+    overlayCanvas.width = rect.width * dpr;
+    overlayCanvas.height = rect.height * dpr;
+    
+    // Reapply DPI scaling
+    overlayCtx.scale(dpr, dpr);
+    
+    console.log(`[EOD] ✅ Canvas dimensions synced: ${rect.width}x${rect.height} CSS, DPR: ${dpr}`);
+  }
+  
   let renderOverlayThrottle = null;
   function renderOverlay() {
     // Throttle overlay rendering for performance
@@ -3185,6 +3226,63 @@
     renderOverlayThrottle = setTimeout(() => {
       renderOverlayImmediate();
     }, 16); // ~60fps
+  }
+  
+  // ===== COORDINATE ACCURACY VALIDATION =====
+  function validateCoordinateAccuracy() {
+    if (!chart || !candleSeries || !overlayCanvas) {
+      return; // Not ready for validation
+    }
+    
+    // Validate a sample of level lines for coordinate drift
+    const levels = getLevelsForSymbol(currentSymbol, currentTimeframe) || [];
+    const trendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe) || [];
+    
+    let driftDetected = false;
+    
+    // Check level coordinate accuracy
+    levels.slice(0, 3).forEach(level => { // Check first 3 levels
+      const expectedY = safePriceToChart(level.price);
+      if (expectedY !== null) {
+        const actualPrice = safeChartToPrice(expectedY);
+        if (actualPrice !== null) {
+          const priceDrift = Math.abs(actualPrice - level.price);
+          const relativeDrift = priceDrift / level.price;
+          
+          if (relativeDrift > 0.001) { // 0.1% drift threshold
+            console.warn(`[EOD] 🚨 Level coordinate drift detected: ${level.price} vs ${actualPrice} (${(relativeDrift * 100).toFixed(3)}%)`);
+            driftDetected = true;
+          }
+        }
+      }
+    });
+    
+    // Check trendline coordinate accuracy
+    trendlines.slice(0, 2).forEach(trendline => { // Check first 2 trendlines
+      const startX = safeTimeToLogical(trendline.startTime);
+      const startY = safePriceToChart(trendline.startPrice);
+      
+      if (startX !== null && startY !== null) {
+        const actualTime = safeLogicalToTime(startX);
+        const actualPrice = safeChartToPrice(startY);
+        
+        if (actualTime !== null && actualPrice !== null) {
+          const timeDrift = Math.abs(actualTime - trendline.startTime);
+          const priceDrift = Math.abs(actualPrice - trendline.startPrice);
+          const relativePriceDrift = priceDrift / trendline.startPrice;
+          
+          if (relativePriceDrift > 0.001) { // 0.1% drift threshold
+            console.warn(`[EOD] 🚨 Trendline coordinate drift detected: ${trendline.startPrice} vs ${actualPrice} (${(relativePriceDrift * 100).toFixed(3)}%)`);
+            driftDetected = true;
+          }
+        }
+      }
+    });
+    
+    if (driftDetected) {
+      console.log('[EOD] 🔄 Coordinate drift detected - triggering corrective overlay redraw');
+      renderOverlay();
+    }
   }
   
   function renderOverlayImmediate() {
@@ -4985,13 +5083,75 @@
     dragState = { isDragging: false, handleElement: null, isStart: false, isMiddle: false, lineType: null, originalStart: null, originalEnd: null, startMouseTime: null, startMousePrice: null };
   }
   
-  // Track chart viewport changes to keep handles synchronized
-  function setupHandleTracking() {
-    chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+  // ===== COMPREHENSIVE CHART EVENT SYNCHRONIZATION =====
+  function setupChartEventSynchronization() {
+    if (!chart) {
+      console.warn('[EOD] 🚨 Cannot setup chart events - chart not initialized');
+      return;
+    }
+    
+    console.log('[EOD] 🔗 Setting up comprehensive chart event synchronization');
+    
+    // 1. TimeScale changes (zoom/pan/scroll)
+    chart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {
+      console.log('[EOD] 📊 TimeScale changed - triggering overlay sync');
+      
+      // Update line handles if line is selected
       if (selectedLine && selectedLine.type === 'trendline') {
         updateLineHandles();
       }
+      
+      // Critical: Redraw overlay to maintain coordinate synchronization
+      renderOverlay();
+      
+      // Validate coordinate accuracy
+      validateCoordinateAccuracy();
     });
+    
+    // 2. TimeScale logical range changes (includes all transformations)
+    chart.timeScale().subscribeVisibleLogicalRangeChange((logicalRange) => {
+      console.log('[EOD] 📊 Logical range changed - triggering overlay sync', logicalRange);
+      renderOverlay();
+    });
+    
+    // 3. PriceScale changes (vertical zoom/pan) - Using chart priceScale API
+    try {
+      const priceScale = chart.priceScale('right');
+      if (priceScale && typeof priceScale.subscribeVisiblePriceRangeChange === 'function') {
+        priceScale.subscribeVisiblePriceRangeChange((priceRange) => {
+          console.log('[EOD] 📊 PriceScale changed - triggering overlay sync');
+          renderOverlay();
+          validateCoordinateAccuracy();
+        });
+      } else {
+        console.log('[EOD] ℹ️ PriceScale range change subscription not available in this chart version');
+      }
+    } catch (error) {
+      console.log('[EOD] ℹ️ PriceScale subscription not supported, using alternative approach');
+    }
+    
+    // 4. Chart size changes (handled by ResizeObserver but also add redundancy)
+    const chartContainer = document.getElementById('chart');
+    if (chartContainer) {
+      const resizeObserver = new ResizeObserver(entries => {
+        console.log('[EOD] 📊 Chart container resized - triggering full overlay sync');
+        
+        // Delay to ensure chart has finished resizing
+        setTimeout(() => {
+          syncOverlayCanvasDimensions();
+          renderOverlay();
+          validateCoordinateAccuracy();
+        }, 50);
+      });
+      resizeObserver.observe(chartContainer);
+    }
+    
+    // 5. Setup periodic coordinate drift detection
+    setInterval(() => {
+      validateCoordinateAccuracy();
+    }, 5000); // Check every 5 seconds
+    
+    console.log('[EOD] ✅ Chart event synchronization setup complete');
   }
 
   // ---- Event Listeners
@@ -5199,7 +5359,7 @@
   updateLevelsDisplay();
   updateTrendlinesDisplay();
   setupChartInteraction();
-  setupHandleTracking();
+  setupChartEventSynchronization();
   loadSymbol(currentSymbol);
 
   // health check with status indicator
