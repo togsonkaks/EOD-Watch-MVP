@@ -2351,6 +2351,9 @@
 
   console.log('[EOD] ✅ All series created');
   
+  // Set up chart events now that chart is fully initialized
+  setupChartEventSynchronization();
+  
   // Force resize to ensure proper rendering
   setTimeout(() => {
     try {
@@ -5615,7 +5618,6 @@
   updateLevelsDisplay();
   updateTrendlinesDisplay();
   setupChartInteraction();
-  setupChartEventSynchronization();
   loadSymbol(currentSymbol);
 
   // health check with status indicator
