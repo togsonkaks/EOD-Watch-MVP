@@ -2269,12 +2269,26 @@
       return false;
     }
     
+    // Check container dimensions
+    const containerWidth = chartContainer.offsetWidth;
+    const containerHeight = chartContainer.offsetHeight;
+    
+    if (containerWidth === 0 || containerHeight === 0) {
+      console.error('[EOD] ❌ Chart container has zero dimensions!', {
+        width: containerWidth,
+        height: containerHeight,
+        clientWidth: chartContainer.clientWidth,
+        clientHeight: chartContainer.clientHeight
+      });
+      return false;
+    }
+    
     // Clear any existing content
     chartContainer.innerHTML = '';
     
     try {
       chart = LightweightCharts.createChart(chartContainer, {
-        width: chartContainer.offsetWidth,
+        width: containerWidth,
         height: 520,
     layout: { background: { color: '#0e1a24' }, textColor: '#cbd5e1' },
     grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
@@ -2327,6 +2341,16 @@
   bbLowerSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
 
   console.log('[EOD] ✅ All series created');
+  
+  // Force resize to ensure proper rendering
+  setTimeout(() => {
+    try {
+      chart.resize(containerWidth, 520);
+      console.log('[EOD] 🔄 Chart resized to:', containerWidth, 'x', 520);
+    } catch (error) {
+      console.error('[EOD] ❌ Chart resize failed:', error);
+    }
+  }, 100);
   
   return true;
   } catch (error) {
@@ -3805,6 +3829,20 @@
       
       console.log(`[EOD] Filtered ${bars.length - dailyBars.length} invalid bars`);
       candleSeries.setData(chartBars);
+      
+      // Verify chart is rendering properly after data load
+      setTimeout(() => {
+        try {
+          const testCoord = chart.timeScale().coordinateToTime(100);
+          if (testCoord === null) {
+            console.error('[EOD] ❌ Chart coordinate conversion still fails after data load!');
+          } else {
+            console.log('[EOD] ✅ Chart is rendering correctly with data:', testCoord);
+          }
+        } catch (error) {
+          console.error('[EOD] ❌ Chart coordinate test error:', error);
+        }
+      }, 50);
       
       // Update indicators based on toggles with validation
       if (indicators.ema200) {
