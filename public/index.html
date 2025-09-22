@@ -613,6 +613,10 @@
   // Global chart variables
   let chart;
   let candleSeries;
+  let emaSeries;
+  let bbUpperSeries;
+  let bbMiddleSeries;
+  let bbLowerSeries;
   
   let watchlist = JSON.parse(localStorage.getItem('eod-watchlist') || '["AAPL", "META", "TSLA", "GOOGL", "MSFT"]');
   let currentSymbol = localStorage.getItem('eod-current-symbol') || 'AAPL';
@@ -2317,21 +2321,12 @@
     borderDownColor: '#ef4444'
   });
   // indicators
-  const emaSeries = chart.addLineSeries({ color: '#60a5fa', lineWidth: 2 });
-  const bbUpperSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
-  const bbMiddleSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1, lineStyle: 2 });
-  const bbLowerSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
+  emaSeries = chart.addLineSeries({ color: '#60a5fa', lineWidth: 2 });
+  bbUpperSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
+  bbMiddleSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1, lineStyle: 2 });
+  bbLowerSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
 
   console.log('[EOD] ✅ All series created');
-  
-  // Test if chart is actually working by adding test data immediately
-  const testData = [
-    { time: '2023-01-01', open: 100, high: 105, low: 95, close: 102 },
-    { time: '2023-01-02', open: 102, high: 108, low: 100, close: 106 },
-    { time: '2023-01-03', open: 106, high: 110, low: 104, close: 108 }
-  ];
-  candleSeries.setData(testData);
-  console.log('[EOD] 🧪 Test data set to candleSeries');
   
   return true;
   } catch (error) {
