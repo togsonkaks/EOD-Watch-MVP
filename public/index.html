@@ -2034,6 +2034,8 @@
       const logical = chartToLogical(x);
       const price = chartToPrice(y);
       
+      console.log('[EOD] 🎯 Processing overlay click - logical:', logical, 'price:', price);
+      
       if (logical !== null && price !== null && !isNaN(logical) && !isNaN(price)) {
         if (overlayState.drawingTool === 'level') {
           overlayAddLevel(price);
@@ -3174,7 +3176,8 @@
   // ---- Chart Interaction
   
   function setupChartInteraction() {
-    chart.subscribeClick(param => {
+    // OLD DRAWING SYSTEM - DISABLED FOR OVERLAY SYSTEM  
+    /* chart.subscribeClick(param => {
       if (param.point) {
         const price = candleSeries.coordinateToPrice(param.point.y);
         const time = chart.timeScale().coordinateToTime(param.point.x);
@@ -3233,7 +3236,7 @@
           console.log('[EOD] ⚠️ Invalid coordinates for drawing - price:', price, 'time:', time);
         }
       }
-    });
+    }); */
 
     // ==== SETUP BUTTERY SMOOTH POINTER EVENTS ====
     let chartContainer = document.getElementById('chart');
