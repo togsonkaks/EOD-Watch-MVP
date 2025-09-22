@@ -2,8 +2,8 @@ const path = require('path');
 const express = require('express');
 const fetch = require('node-fetch');   // v2 matches CommonJS
 const cors = require('cors');
-const { getBarsCached } = require('./cache.js');
 require('dotenv').config();
+const { getBarsCached } = require('./cache.js');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
