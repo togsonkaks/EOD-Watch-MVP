@@ -1491,7 +1491,7 @@
   function onPointerDown(e) {
     // DISABLE DRAG SYSTEM DURING DRAWING MODE TO PREVENT CONFLICTS
     if (drawingMode) {
-      console.log('[EOD] 🚫 Drag system disabled during drawing mode');
+      console.log('[EOD] 🚫 Drag system disabled during drawing mode - tool:', drawingTool, 'mode:', drawingMode);
       return; // Let the simple click system handle this
     }
     
@@ -2943,6 +2943,7 @@
             drawingMode = false;
             $('#level-tool').classList.remove('active');
             document.body.classList.remove('drawing-mode');
+            console.log('[EOD] ✅ Drawing mode disabled after level completion - drawingMode now:', drawingMode);
           } else if (drawingMode && drawingTool === 'trendline') {
             if (!trendlineStart) {
               // First click: set start point
@@ -2959,6 +2960,7 @@
               $('#trendline-tool').classList.remove('active');
               document.body.classList.remove('drawing-mode');
               trendlineStart = null;
+              console.log('[EOD] ✅ Drawing mode disabled after trendline completion - drawingMode now:', drawingMode);
             }
           }
         }
