@@ -1964,8 +1964,8 @@
     return null;
   }
 
-  // Detect clicks on indicators (EMA, Bollinger Bands)
-  function detectIndicatorClick(clickX, clickY, tolerance = 200) {
+  // Detect clicks on indicators (EMA, Bollinger Bands) using price-based detection
+  function detectIndicatorClick(clickX, clickY, tolerance = 10) {
     if (!tfBars || tfBars.length === 0) {
       console.log('[DEBUG] No tfBars available for indicator click detection');
       return null;
@@ -1985,23 +1985,28 @@
       return null;
     }
     
-    console.log(`[DEBUG] Checking indicator click at bar index ${closestBarIndex}, indicators:`, indicators);
+    console.log(`[DEBUG] Checking indicator click at bar index ${closestBarIndex}, clickPrice=${clickPrice}`);
     
-    // Check if indicators are enabled and have data
+    // Check if indicators are enabled and have data - use price-based detection instead of coordinate conversion
+    // Check all indicators and return the closest match instead of returning early
+    let bestMatch = null;
+    let bestDiff = tolerance + 1;
+    
     if (indicators.ema200) {
       const emaData = emaFromBars(tfBars, 200);
       if (emaData && emaData[closestBarIndex]) {
         const emaValue = emaData[closestBarIndex].value;
-        const emaY = candleSeries.priceToCoordinate(emaValue);
-        console.log(`[DEBUG] EMA check: value=${emaValue}, Y=${emaY}, clickY=${clickY}, diff=${Math.abs(clickY - emaY)}`);
-        if (emaY !== null && Math.abs(clickY - emaY) <= tolerance) {
+        const priceDiff = Math.abs(clickPrice - emaValue);
+        console.log(`[DEBUG] EMA check: value=${emaValue}, clickPrice=${clickPrice}, priceDiff=${priceDiff}`);
+        if (priceDiff <= tolerance && priceDiff < bestDiff) {
           console.log('[DEBUG] EMA click detected!');
-          return {
+          bestMatch = {
             type: 'ema',
             id: 'ema200',
             price: emaValue,
             currentValue: emaValue
           };
+          bestDiff = priceDiff;
         }
       }
     }
@@ -2012,31 +2017,37 @@
         const upperValue = bbData.upper[closestBarIndex].value;
         const lowerValue = bbData.lower[closestBarIndex].value;
         
-        const upperY = candleSeries.priceToCoordinate(upperValue);
-        const lowerY = candleSeries.priceToCoordinate(lowerValue);
+        const upperDiff = Math.abs(clickPrice - upperValue);
+        const lowerDiff = Math.abs(clickPrice - lowerValue);
         
-        console.log(`[DEBUG] BB check: upper=${upperValue}(Y=${upperY}), lower=${lowerValue}(Y=${lowerY}), clickY=${clickY}`);
+        console.log(`[DEBUG] BB check: upper=${upperValue}(diff=${upperDiff}), lower=${lowerValue}(diff=${lowerDiff}), clickPrice=${clickPrice}`);
         
-        if (upperY !== null && Math.abs(clickY - upperY) <= tolerance) {
+        if (upperDiff <= tolerance && upperDiff < bestDiff) {
           console.log('[DEBUG] BB upper click detected!');
-          return {
+          bestMatch = {
             type: 'bb_upper',
             id: 'bb_upper',
             price: upperValue,
             currentValue: upperValue
           };
+          bestDiff = upperDiff;
         }
         
-        if (lowerY !== null && Math.abs(clickY - lowerY) <= tolerance) {
+        if (lowerDiff <= tolerance && lowerDiff < bestDiff) {
           console.log('[DEBUG] BB lower click detected!');
-          return {
+          bestMatch = {
             type: 'bb_lower',
             id: 'bb_lower',
             price: lowerValue,
             currentValue: lowerValue
           };
+          bestDiff = lowerDiff;
         }
       }
+    }
+    
+    if (bestMatch) {
+      return bestMatch;
     }
     
     console.log('[DEBUG] No indicator click detected');
