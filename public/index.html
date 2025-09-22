@@ -1578,16 +1578,10 @@
             log(`Selected level at $${level.price.toFixed(2)} for editing`);
           }
         } else {
-          // Check for indicator clicks
-          const indicatorClick = detectIndicatorClick(px, py);
-          if (indicatorClick) {
-            log(`Clicked on ${indicatorClick.type} indicator`);
-          } else {
-            // Deselect any selected line if clicking on empty space
-            if (selectedLine) {
-              deselectLine();
-              log('Line deselected');
-            }
+          // Deselect any selected line if clicking on empty space
+          if (selectedLine) {
+            deselectLine();
+            log('Line deselected');
           }
         }
       }
@@ -2709,13 +2703,6 @@
               log(`Selected ${clickedLine.type} line for editing`);
               return;
             } else {
-              // Check if clicking on indicators (EMA or Bollinger Bands)
-              const indicatorClick = detectIndicatorClick(param.point.x, param.point.y);
-              if (indicatorClick) {
-                log(`Clicked on ${indicatorClick.type} indicator`);
-                return;
-              }
-              
               // Clicked on empty space - deselect current line
               if (selectedLine) {
                 deselectLine();
@@ -2826,71 +2813,6 @@
     return null;
   }
 
-  // Detect clicks on indicators (EMA, Bollinger Bands)
-  function detectIndicatorClick(clickX, clickY, tolerance = 8) {
-    if (!tfBars || tfBars.length === 0) return null;
-    
-    const clickTime = chart.timeScale().coordinateToTime(clickX);
-    const clickPrice = candleSeries.coordinateToPrice(clickY);
-    if (!clickTime || !clickPrice) return null;
-    
-    // Find the closest bar to the click
-    const closestBarIndex = findClosestBarIndex(tfBars, clickTime);
-    if (closestBarIndex === -1) return null;
-    
-    // Check if indicators are enabled and have data
-    if (indicators.ema200) {
-      const emaData = emaFromBars(tfBars, 200);
-      if (emaData && emaData[closestBarIndex]) {
-        const emaValue = emaData[closestBarIndex].value;
-        const emaY = candleSeries.priceToCoordinate(emaValue);
-        if (emaY !== null && Math.abs(clickY - emaY) <= tolerance) {
-          return {
-            type: 'ema',
-            id: 'ema200',
-            price: emaValue,
-            value: emaValue,
-            name: 'EMA(200)'
-          };
-        }
-      }
-    }
-    
-    if (indicators.bb20) {
-      const bbData = bbFromBars(tfBars, 20, 2);
-      if (bbData && bbData.upper[closestBarIndex]) {
-        const upperValue = bbData.upper[closestBarIndex].value;
-        const lowerValue = bbData.lower[closestBarIndex].value;
-        
-        const upperY = candleSeries.priceToCoordinate(upperValue);
-        const lowerY = candleSeries.priceToCoordinate(lowerValue);
-        
-        if (upperY !== null && Math.abs(clickY - upperY) <= tolerance) {
-          return {
-            type: 'bb',
-            band: 'upper',
-            id: 'bb_upper',
-            price: upperValue,
-            value: upperValue,
-            name: 'BB Upper'
-          };
-        }
-        
-        if (lowerY !== null && Math.abs(clickY - lowerY) <= tolerance) {
-          return {
-            type: 'bb',
-            band: 'lower', 
-            id: 'bb_lower',
-            price: lowerValue,
-            value: lowerValue,
-            name: 'BB Lower'
-          };
-        }
-      }
-    }
-    
-    return null;
-  }
   
   // Helper function to find closest bar index for a given time
   function findClosestBarIndex(bars, targetTime) {
