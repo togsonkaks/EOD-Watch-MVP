@@ -1965,7 +1965,7 @@
   }
 
   // Detect clicks on indicators (EMA, Bollinger Bands) using price-based detection
-  function detectIndicatorClick(clickX, clickY, tolerance = 10) {
+  function detectIndicatorClick(clickX, clickY, tolerance = 100) {
     if (!tfBars || tfBars.length === 0) {
       console.log('[DEBUG] No tfBars available for indicator click detection');
       return null;
@@ -3226,6 +3226,9 @@
     
     modal.style.display = 'flex';
   }
+  
+  // Expose openAlertModal globally for context menu access
+  window.openAlertModal = openAlertModal;
   
   // Close alert modal
   window.closeAlertModal = function() {
