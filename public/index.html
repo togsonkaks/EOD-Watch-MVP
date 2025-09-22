@@ -996,6 +996,14 @@
           alertDialogState.data = { ...data, band: legacyBand };
         }
         break;
+      case 'drawing_level':
+        price = data.targetPrice;
+        info = `Drawing Level at $${price.toFixed(2)}`;
+        break;
+      case 'drawing_trendline':
+        price = data.targetPrice;
+        info = `Drawing Trendline at $${price.toFixed(2)}`;
+        break;
     }
     
     // For level alerts, we need a price. For dynamic alerts, we don't.
@@ -1131,6 +1139,16 @@
           alertData.stddev = 2;
           break;
       }
+    } else if (alertDialogState.type === 'drawing_level' || alertDialogState.type === 'drawing_trendline') {
+      // Drawing alerts: store drawing reference and target price
+      alertData.type = alertDialogState.type;
+      alertData.price = alertDialogState.targetPrice;
+      alertData.drawingData = {
+        drawing: alertDialogState.data.drawing,
+        symbol: alertDialogState.data.symbol,
+        timeframe: alertDialogState.data.timeframe,
+        targetPrice: alertDialogState.data.targetPrice
+      };
     } else {
       // Level schema: { type: 'level', price, direction, symbol, timeframe, timestamp }
       alertData.type = 'level';
@@ -1161,6 +1179,13 @@
         console.log('[EOD] ✅ BB Alert - Band:', alertData.band);
         console.log('[EOD] ✅ BB Alert - Period:', alertData.period);
         console.log('[EOD] ✅ BB Alert - Stddev:', alertData.stddev);
+        break;
+      case 'drawing_level':
+        console.log('[EOD] ✅ Drawing Level Alert - Price:', alertData.price);
+        break;
+      case 'drawing_trendline':
+        console.log('[EOD] ✅ Drawing Trendline Alert - Price:', alertData.price);
+        console.log('[EOD] ✅ Drawing Data:', alertData.drawingData);
         break;
     }
     
@@ -2013,14 +2038,17 @@
 
   // ===== EXCLUSIVE OVERLAY EVENT HANDLING =====
   function setupOverlayEventHandling() {
-    // Toggle pointer events based on drawing mode
-    function updatePointerEvents() {
-      overlayCanvas.style.pointerEvents = overlayState.drawingMode ? 'auto' : 'none';
-    }
     
     overlayCanvas.addEventListener('pointerdown', (e) => {
       console.log('[EOD] 🎯 Overlay canvas clicked! Drawing mode:', overlayState.drawingMode, 'Tool:', overlayState.drawingTool);
-      if (!overlayState.drawingMode) return;
+      
+      // Handle line selection when not in drawing mode
+      if (!overlayState.drawingMode) {
+        if (hoveredDrawing) {
+          handleLineSelection(e, hoveredDrawing);
+        }
+        return;
+      }
       
       e.stopImmediatePropagation();
       e.preventDefault();
@@ -2043,7 +2071,7 @@
           overlayState.drawingMode = false;
           $('#level-tool').classList.remove('active');
           document.body.classList.remove('drawing-mode');
-          updatePointerEvents();
+          updateHoverFeedback();
           console.log('[EOD] ✅ Overlay level completed');
         } else if (overlayState.drawingTool === 'trendline') {
           if (!overlayState.trendlineStart) {
@@ -2058,7 +2086,7 @@
             overlayState.drawingMode = false;
             $('#trendline-tool').classList.remove('active');
             document.body.classList.remove('drawing-mode');
-            updatePointerEvents();
+            updateHoverFeedback();
             console.log('[EOD] ✅ Overlay trendline completed');
           }
         }
@@ -2068,14 +2096,246 @@
       chart.applyOptions({ handleScroll: true, handleScale: true });
     }, { capture: true });
     
-    // Update pointer events when drawing mode changes
-    const originalLevelClick = $('#level-tool').onclick;
-    const originalTrendlineClick = $('#trendline-tool').onclick;
+    // Update hover feedback when drawing mode changes
+    $('#level-tool').addEventListener('click', () => updateHoverFeedback());
+    $('#trendline-tool').addEventListener('click', () => updateHoverFeedback());
     
-    $('#level-tool').addEventListener('click', updatePointerEvents);
-    $('#trendline-tool').addEventListener('click', updatePointerEvents);
+    // Add hover detection for interactive line selection
+    setupHoverDetection();
     
     console.log('[EOD] ✅ Overlay event handling setup');
+  }
+
+  // ===== HOVER DETECTION AND HIT TESTING =====
+  let hoveredDrawing = null;
+  let selectedDrawing = null;
+  
+  function setupHoverDetection() {
+    overlayCanvas.addEventListener('mousemove', (e) => {
+      if (overlayState.drawingMode) return; // Don't interfere with drawing mode
+      
+      const rect = overlayCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      const drawing = hitTestDrawings(x, y);
+      
+      if (drawing !== hoveredDrawing) {
+        hoveredDrawing = drawing;
+        updateHoverFeedback();
+      }
+    });
+    
+    overlayCanvas.addEventListener('mouseleave', () => {
+      if (hoveredDrawing) {
+        hoveredDrawing = null;
+        updateHoverFeedback();
+      }
+    });
+    
+    // Prevent default context menu on overlay
+    overlayCanvas.addEventListener('contextmenu', (e) => {
+      if (hoveredDrawing) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    });
+  }
+  
+  function hitTestDrawings(x, y) {
+    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
+    const tolerance = 8; // pixels
+    
+    // Test trendlines first (more specific)
+    for (let i = 0; i < drawings.trendlines.length; i++) {
+      const trendline = drawings.trendlines[i];
+      if (hitTestTrendline(x, y, trendline, tolerance)) {
+        return { type: 'trendline', index: i, drawing: trendline };
+      }
+    }
+    
+    // Test levels
+    for (let i = 0; i < drawings.levels.length; i++) {
+      const level = drawings.levels[i];
+      if (hitTestLevel(x, y, level, tolerance)) {
+        return { type: 'level', index: i, drawing: level };
+      }
+    }
+    
+    return null;
+  }
+  
+  function hitTestLevel(x, y, level, tolerance) {
+    if (!level || typeof level.price === 'undefined') return false;
+    
+    const levelY = priceToChart(level.price);
+    if (levelY === null || isNaN(levelY)) return false;
+    
+    return Math.abs(y - levelY) <= tolerance;
+  }
+  
+  function hitTestTrendline(x, y, trendline, tolerance) {
+    const x1 = logicalToChart(trendline.x1Logical);
+    const y1 = priceToChart(trendline.y1Price);
+    const x2 = logicalToChart(trendline.x2Logical);
+    const y2 = priceToChart(trendline.y2Price);
+    
+    if (x1 === null || y1 === null || x2 === null || y2 === null ||
+        isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) {
+      return false;
+    }
+    
+    return distanceToLineSegment(x, y, x1, y1, x2, y2) <= tolerance;
+  }
+  
+  function distanceToLineSegment(px, py, x1, y1, x2, y2) {
+    const A = px - x1;
+    const B = py - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+    
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    
+    if (lenSq === 0) return Math.sqrt(A * A + B * B); // Point case
+    
+    let param = dot / lenSq;
+    param = Math.max(0, Math.min(1, param)); // Clamp to segment
+    
+    const xx = x1 + param * C;
+    const yy = y1 + param * D;
+    
+    const dx = px - xx;
+    const dy = py - yy;
+    
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  
+  function updateHoverFeedback() {
+    // Update pointer events: enable when hovering a drawing
+    const shouldEnablePointer = overlayState.drawingMode || hoveredDrawing;
+    overlayCanvas.style.pointerEvents = shouldEnablePointer ? 'auto' : 'none';
+    
+    // Update cursor
+    if (hoveredDrawing) {
+      overlayCanvas.style.cursor = 'pointer';
+      console.log('[EOD] 🎯 Hovering over', hoveredDrawing.type, 'at index', hoveredDrawing.index);
+    } else {
+      overlayCanvas.style.cursor = overlayState.drawingMode ? 'crosshair' : 'default';
+    }
+  }
+  
+  // ===== LINE SELECTION AND INTERACTION =====
+  function handleLineSelection(e, drawing) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    
+    if (e.button === 2) { // Right-click
+      handleRightClickLine(e, drawing);
+      return;
+    }
+    
+    if (e.button === 0) { // Left-click
+      selectedDrawing = drawing;
+      console.log('[EOD] ✅ Selected', drawing.type, 'at index', drawing.index);
+      renderOverlay(); // Re-render to show selection
+    }
+  }
+  
+  function handleRightClickLine(e, drawing) {
+    // Calculate price at cursor position for the drawing
+    let targetPrice;
+    if (drawing.type === 'level') {
+      targetPrice = drawing.drawing.price;
+    } else if (drawing.type === 'trendline') {
+      // Calculate trendline price at cursor position
+      const rect = overlayCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      targetPrice = calculateTrendlinePrice(drawing.drawing, x);
+    }
+    
+    console.log('[EOD] 🎯 Right-click on', drawing.type, 'price:', targetPrice?.toFixed(2));
+    
+    // Show context menu for setting alerts
+    showDrawingContextMenu(e, drawing, targetPrice);
+  }
+  
+  function calculateTrendlinePrice(trendline, screenX) {
+    const x1 = logicalToChart(trendline.x1Logical);
+    const x2 = logicalToChart(trendline.x2Logical);
+    const y1Price = trendline.y1Price;
+    const y2Price = trendline.y2Price;
+    
+    if (x1 === null || x2 === null || x1 === x2) {
+      return y1Price; // Fallback to first point
+    }
+    
+    // Linear interpolation along the line
+    const ratio = (screenX - x1) / (x2 - x1);
+    return y1Price + ratio * (y2Price - y1Price);
+  }
+  
+  function showDrawingContextMenu(e, drawing, targetPrice) {
+    // Use existing context menu system properly
+    const drawingName = drawing.type === 'level' ? 
+      `Level ${targetPrice.toFixed(2)}` : 
+      `Trendline ${targetPrice.toFixed(2)}`;
+    
+    // Create drawing-specific menu items
+    const menuItems = [
+      { 
+        icon: '🔔', 
+        label: `Set Alert for ${drawingName}`, 
+        action: () => openDrawingAlert(drawing, targetPrice) 
+      },
+      { separator: true },
+      { 
+        icon: '🗑️', 
+        label: `Delete ${drawing.type}`, 
+        action: () => deleteDrawing(drawing) 
+      }
+    ];
+    
+    // Use existing showContextMenu function
+    showContextMenu(e.clientX, e.clientY, `drawing_${drawing.type}`, { 
+      ...drawing, 
+      targetPrice,
+      drawingName,
+      menuItems 
+    });
+    
+    console.log('[EOD] 📋 Context menu shown for', drawingName);
+  }
+  
+  function openDrawingAlert(drawing, targetPrice) {
+    // Integrate with existing alert dialog
+    const type = drawing.type === 'level' ? 'drawing_level' : 'drawing_trendline';
+    const data = {
+      drawing,
+      targetPrice,
+      symbol: currentSymbol,
+      timeframe: currentTimeframe
+    };
+    
+    showAlertDialog(type, data);
+  }
+  
+  function deleteDrawing(drawing) {
+    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
+    
+    if (drawing.type === 'level') {
+      drawings.levels.splice(drawing.index, 1);
+    } else if (drawing.type === 'trendline') {
+      drawings.trendlines.splice(drawing.index, 1);
+    }
+    
+    // Clear selection if this drawing was selected
+    if (selectedDrawing && selectedDrawing.index === drawing.index && selectedDrawing.type === drawing.type) {
+      selectedDrawing = null;
+    }
+    
+    renderOverlay();
+    console.log('[EOD] 🗑️ Deleted', drawing.type, 'at index', drawing.index);
   }
 
   // ===== ISOLATED COORDINATE SYSTEM =====
@@ -2189,17 +2449,19 @@
     });
     
     // Render selection handles if needed
-    if (overlayState.selectedDrawing) {
-      renderSelectionHandles(overlayState.selectedDrawing);
+    if (selectedDrawing) {
+      renderSelectionHandles(selectedDrawing);
     }
   }
 
-  function renderSelectionHandles(drawing) {
+  function renderSelectionHandles(selectedObj) {
     overlayCtx.fillStyle = '#ffffff';
     overlayCtx.strokeStyle = '#000000';
     overlayCtx.lineWidth = 1;
     
-    if (drawing.type === 'level') {
+    const drawing = selectedObj.drawing;
+    
+    if (selectedObj.type === 'level') {
       const y = priceToChart(drawing.price);
       if (y !== null && !isNaN(y)) {
         const rect = overlayCanvas.getBoundingClientRect();
@@ -2207,7 +2469,7 @@
         overlayCtx.fillRect(x - 4, y - 4, 8, 8);
         overlayCtx.strokeRect(x - 4, y - 4, 8, 8);
       }
-    } else if (drawing.type === 'trendline') {
+    } else if (selectedObj.type === 'trendline') {
       const x1 = logicalToChart(drawing.x1Logical);
       const y1 = priceToChart(drawing.y1Price);
       const x2 = logicalToChart(drawing.x2Logical);
