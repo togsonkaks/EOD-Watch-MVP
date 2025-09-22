@@ -2046,6 +2046,9 @@
       if (!overlayState.drawingMode) {
         if (hoveredDrawing) {
           handleLineSelection(e, hoveredDrawing);
+        } else {
+          // Allow chart to handle the click
+          return;
         }
         return;
       }
@@ -2111,7 +2114,10 @@
   let selectedDrawing = null;
   
   function setupHoverDetection() {
+    console.log('[EOD] 🎯 Setting up hover detection on overlay canvas');
+    
     overlayCanvas.addEventListener('mousemove', (e) => {
+      console.log('[EOD] 🔍 Mouse move detected on overlay');
       if (overlayState.drawingMode) return; // Don't interfere with drawing mode
       
       const rect = overlayCanvas.getBoundingClientRect();
@@ -2123,6 +2129,12 @@
       if (drawing !== hoveredDrawing) {
         hoveredDrawing = drawing;
         updateHoverFeedback();
+      }
+      
+      // Only prevent chart interaction when NOT hovering over drawings or in drawing mode
+      if (!hoveredDrawing && !overlayState.drawingMode) {
+        // Allow chart interactions by not preventing the event
+        return;
       }
     });
     
@@ -2212,9 +2224,11 @@
   }
   
   function updateHoverFeedback() {
-    // Update pointer events: enable when hovering a drawing
-    const shouldEnablePointer = overlayState.drawingMode || hoveredDrawing;
-    overlayCanvas.style.pointerEvents = shouldEnablePointer ? 'auto' : 'none';
+    // CRITICAL FIX: Always enable pointer events for mousemove detection
+    // We'll handle chart interaction prevention in the event handlers
+    overlayCanvas.style.pointerEvents = 'auto';
+    
+    console.log('[EOD] 🔧 updateHoverFeedback - drawingMode:', overlayState.drawingMode, 'hoveredDrawing:', !!hoveredDrawing);
     
     // Update cursor
     if (hoveredDrawing) {
