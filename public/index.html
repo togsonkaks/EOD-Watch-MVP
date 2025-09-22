@@ -789,6 +789,55 @@
     chartContainer.style.cursor = '';
   }
 
+  function onContextMenu(e) {
+    e.preventDefault(); // Prevent browser context menu
+    
+    const rect = document.getElementById('chart').getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    
+    // Check for line clicks first
+    const trendlineHit = hitTestTrendlines(px, py);
+    const levelHit = hitTestLevel(px, py);
+    
+    if (trendlineHit) {
+      const t = trendSeriesById.get(trendlineHit.id)?.data;
+      if (t) {
+        const time = chart.timeScale().coordinateToTime(px);
+        const trendPrice = calculateTrendlinePrice(t, time);
+        openAlertModal({
+          type: 'trendline',
+          id: trendlineHit.id,
+          price: trendPrice,
+          trendlineData: t
+        });
+        log(`Alert setup for trendline via right-click`);
+      }
+      return;
+    }
+    
+    if (levelHit) {
+      const level = levelLineById.get(levelHit.id)?.data;
+      if (level) {
+        openAlertModal({
+          type: 'level',
+          id: levelHit.id,
+          price: level.price,
+          trendlineData: null
+        });
+        log(`Alert setup for level at $${level.price.toFixed(2)} via right-click`);
+      }
+      return;
+    }
+    
+    // Check for indicator clicks
+    const indicatorClick = detectIndicatorClick(px, py);
+    if (indicatorClick) {
+      openAlertModal(indicatorClick);
+      log(`Alert setup for ${indicatorClick.type} via right-click`);
+    }
+  }
+
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
     autoSize: true,
@@ -1850,6 +1899,7 @@
     chartContainer.addEventListener('pointermove', onPointerMove, { passive: true });
     chartContainer.addEventListener('pointerup', onPointerUp);
     chartContainer.addEventListener('pointercancel', onPointerUp);
+    chartContainer.addEventListener('contextmenu', onContextMenu);
 
     // Keep mousemove only for trendline preview (non-performance critical)
     chartContainer.addEventListener('mousemove', (event) => {
@@ -1914,31 +1964,49 @@
     return null;
   }
 
-  // Detect clicks on indicators (EMA, Bollinger Bands)
-  function detectIndicatorClick(clickX, clickY, tolerance = 8) {
-    if (!tfBars || tfBars.length === 0) return null;
+  // Detect clicks on indicators (EMA, Bollinger Bands) using price-based detection
+  function detectIndicatorClick(clickX, clickY, tolerance = 100) {
+    if (!tfBars || tfBars.length === 0) {
+      console.log('[DEBUG] No tfBars available for indicator click detection');
+      return null;
+    }
     
     const clickTime = chart.timeScale().coordinateToTime(clickX);
     const clickPrice = candleSeries.coordinateToPrice(clickY);
-    if (!clickTime || !clickPrice) return null;
+    if (!clickTime || !clickPrice) {
+      console.log('[DEBUG] Could not convert coordinates to time/price');
+      return null;
+    }
     
     // Find the closest bar to the click
     const closestBarIndex = findClosestBarIndex(tfBars, clickTime);
-    if (closestBarIndex === -1) return null;
+    if (closestBarIndex === -1) {
+      console.log('[DEBUG] Could not find closest bar index');
+      return null;
+    }
     
-    // Check if indicators are enabled and have data
+    console.log(`[DEBUG] Checking indicator click at bar index ${closestBarIndex}, clickPrice=${clickPrice}`);
+    
+    // Check if indicators are enabled and have data - use price-based detection instead of coordinate conversion
+    // Check all indicators and return the closest match instead of returning early
+    let bestMatch = null;
+    let bestDiff = tolerance + 1;
+    
     if (indicators.ema200) {
       const emaData = emaFromBars(tfBars, 200);
       if (emaData && emaData[closestBarIndex]) {
         const emaValue = emaData[closestBarIndex].value;
-        const emaY = candleSeries.priceToCoordinate(emaValue);
-        if (emaY !== null && Math.abs(clickY - emaY) <= tolerance) {
-          return {
+        const priceDiff = Math.abs(clickPrice - emaValue);
+        console.log(`[DEBUG] EMA check: value=${emaValue}, clickPrice=${clickPrice}, priceDiff=${priceDiff}`);
+        if (priceDiff <= tolerance && priceDiff < bestDiff) {
+          console.log('[DEBUG] EMA click detected!');
+          bestMatch = {
             type: 'ema',
             id: 'ema200',
             price: emaValue,
             currentValue: emaValue
           };
+          bestDiff = priceDiff;
         }
       }
     }
@@ -1949,29 +2017,40 @@
         const upperValue = bbData.upper[closestBarIndex].value;
         const lowerValue = bbData.lower[closestBarIndex].value;
         
-        const upperY = candleSeries.priceToCoordinate(upperValue);
-        const lowerY = candleSeries.priceToCoordinate(lowerValue);
+        const upperDiff = Math.abs(clickPrice - upperValue);
+        const lowerDiff = Math.abs(clickPrice - lowerValue);
         
-        if (upperY !== null && Math.abs(clickY - upperY) <= tolerance) {
-          return {
+        console.log(`[DEBUG] BB check: upper=${upperValue}(diff=${upperDiff}), lower=${lowerValue}(diff=${lowerDiff}), clickPrice=${clickPrice}`);
+        
+        if (upperDiff <= tolerance && upperDiff < bestDiff) {
+          console.log('[DEBUG] BB upper click detected!');
+          bestMatch = {
             type: 'bb_upper',
             id: 'bb_upper',
             price: upperValue,
             currentValue: upperValue
           };
+          bestDiff = upperDiff;
         }
         
-        if (lowerY !== null && Math.abs(clickY - lowerY) <= tolerance) {
-          return {
+        if (lowerDiff <= tolerance && lowerDiff < bestDiff) {
+          console.log('[DEBUG] BB lower click detected!');
+          bestMatch = {
             type: 'bb_lower',
             id: 'bb_lower',
             price: lowerValue,
             currentValue: lowerValue
           };
+          bestDiff = lowerDiff;
         }
       }
     }
     
+    if (bestMatch) {
+      return bestMatch;
+    }
+    
+    console.log('[DEBUG] No indicator click detected');
     return null;
   }
   
@@ -2942,7 +3021,7 @@
     // Bootstrap 200 seed minutes so EMA/BB have data
     testBars = [baseFrom];
     for (let i=0;i<220;i++) testBars.push(genNextMinute(testBars.at(-1), 18));
-    candle.setData(testBars);
+    candleSeries.setData(testBars);
     emaSeries.setData(emaFromBars(testBars, 200));
     const bb = bbFromBars(testBars, 20, 2);
     bbUpperSeries.setData(bb.upper);
@@ -2956,7 +3035,7 @@
   function testTick() {
     const next = genNextMinute(testBars.at(-1), 22);
     testBars.push(next);
-    candle.update(next);
+    candleSeries.update(next);
 
     // Update indicators incrementally
     const emaArr = emaFromBars(testBars, 200);     // fine for test; optimize later if needed
@@ -2974,6 +3053,10 @@
 
     // Update signals panel with live results
     updateSignalsPanel(res);
+    
+    // Check stored alerts and trigger popups if conditions are met
+    const currentPrice = testBars[testBars.length - 1].close;
+    checkStoredAlerts(res, currentPrice);
 
     // Log important crossings
     if (res.ema && res.ema.includes('cross')) {
@@ -3064,6 +3147,10 @@
     const res = evaluateCrossSuite(tfBars, levels, trends, { useEMA200:true, useBB:true });
     
     updateSignalsPanel(res);
+    
+    // Check stored alerts for real data too
+    const currentPrice = tfBars[tfBars.length - 1].close;
+    checkStoredAlerts(res, currentPrice);
   }
 
   // Test mode controls
@@ -3140,6 +3227,9 @@
     modal.style.display = 'flex';
   }
   
+  // Expose openAlertModal globally for context menu access
+  window.openAlertModal = openAlertModal;
+  
   // Close alert modal
   window.closeAlertModal = function() {
     document.getElementById('alert-modal').style.display = 'none';
@@ -3206,6 +3296,93 @@
     
     const timeRatio = (time - trendlineData.startTime) / timeDelta;
     return trendlineData.startPrice + (priceDelta * timeRatio);
+  }
+
+  // Show popup alert when condition is met
+  function showPopupAlert(alertConfig, currentPrice, crossDirection) {
+    const alertMessage = `🚨 ALERT: ${alertConfig.symbol} closed ${crossDirection} ${
+      alertConfig.lineType === 'level' ? '$' + alertConfig.price.toFixed(2) :
+      alertConfig.lineType === 'ema' ? 'EMA(200)' :
+      alertConfig.lineType === 'bb_upper' ? 'Upper Bollinger Band' :
+      alertConfig.lineType === 'bb_lower' ? 'Lower Bollinger Band' :
+      'trendline'
+    }\nCurrent Price: $${currentPrice.toFixed(2)}`;
+    
+    // Show browser alert popup
+    alert(alertMessage);
+    
+    // Also log to console
+    log(`🚨 ALERT TRIGGERED: ${alertMessage.replace(/\n/g, ' | ')}`);
+  }
+
+  // Check stored alerts against current signal results
+  function checkStoredAlerts(signalResults, currentPrice) {
+    const alertsKey = 'eod-alert-configs';
+    const storedAlerts = JSON.parse(localStorage.getItem(alertsKey) || '[]');
+    
+    // Filter alerts for current symbol and timeframe
+    const relevantAlerts = storedAlerts.filter(alert => 
+      alert.symbol === currentSymbol && alert.timeframe === currentTimeframe
+    );
+    
+    for (const alert of relevantAlerts) {
+      let shouldTrigger = false;
+      let crossDirection = '';
+      
+      // Check EMA alerts
+      if (alert.lineType === 'ema' && signalResults.ema && signalResults.ema.includes('cross')) {
+        const isAboveCross = signalResults.ema.includes('up');
+        if ((alert.direction === 'above' && isAboveCross) || 
+            (alert.direction === 'below' && !isAboveCross)) {
+          shouldTrigger = true;
+          crossDirection = isAboveCross ? 'above' : 'below';
+        }
+      }
+      
+      // Check Bollinger Band alerts
+      if ((alert.lineType === 'bb_upper' || alert.lineType === 'bb_lower') && 
+          signalResults.bb && signalResults.bb.includes('cross')) {
+        const bandType = alert.lineType === 'bb_upper' ? 'upper' : 'lower';
+        if (signalResults.bb.includes(bandType)) {
+          const isAboveCross = signalResults.bb.includes('above');
+          if ((alert.direction === 'above' && isAboveCross) || 
+              (alert.direction === 'below' && !isAboveCross)) {
+            shouldTrigger = true;
+            crossDirection = isAboveCross ? 'above' : 'below';
+          }
+        }
+      }
+      
+      // Check level alerts
+      if (alert.lineType === 'level') {
+        const levelCross = signalResults.level.find(l => l.id === alert.lineId && l.dir.includes('cross'));
+        if (levelCross) {
+          const isAboveCross = levelCross.dir.includes('up');
+          if ((alert.direction === 'above' && isAboveCross) || 
+              (alert.direction === 'below' && !isAboveCross)) {
+            shouldTrigger = true;
+            crossDirection = isAboveCross ? 'above' : 'below';
+          }
+        }
+      }
+      
+      // Check trendline alerts
+      if (alert.lineType === 'trendline') {
+        const trendCross = signalResults.trend.find(t => t.id === alert.lineId && t.dir.includes('cross'));
+        if (trendCross) {
+          const isAboveCross = trendCross.dir.includes('up');
+          if ((alert.direction === 'above' && isAboveCross) || 
+              (alert.direction === 'below' && !isAboveCross)) {
+            shouldTrigger = true;
+            crossDirection = isAboveCross ? 'above' : 'below';
+          }
+        }
+      }
+      
+      if (shouldTrigger) {
+        showPopupAlert(alert, currentPrice, crossDirection);
+      }
+    }
   }
 
   // Close modal on outside click
