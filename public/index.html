@@ -1635,10 +1635,16 @@
     const time = chart.timeScale().coordinateToTime(px);
     const price = candleSeries.coordinateToPrice(py);
     
-    // Validate coordinates but be less strict to avoid blocking valid operations
-    if (!time || !price || !isFinite(time) || !isFinite(price)) {
+    // Only validate that we have a valid price for dragging operations
+    if (!price || !isFinite(price)) {
       // Only log occasionally to avoid spam
-      if (Math.random() < 0.01) console.log('[EOD] ⚠️ Invalid coordinates in processPointer - skipping frame');
+      if (Math.random() < 0.01) console.log('[EOD] ⚠️ Invalid price in processPointer - skipping frame');
+      return;
+    }
+    
+    // For time, allow null/undefined in some edge cases but validate when used
+    if (time !== null && time !== undefined && !isFinite(time)) {
+      if (Math.random() < 0.01) console.log('[EOD] ⚠️ Invalid time in processPointer - skipping frame');
       return;
     }
 
@@ -1646,7 +1652,7 @@
     if (!pointerDownState.isDragging) return;
 
     // 1) drag level
-    if (levelDragState.isDragging && levelDragState.id && Number.isFinite(price) && price > 0) {
+    if (levelDragState.isDragging && levelDragState.id && Number.isFinite(price)) {
       const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
       const i = levels.findIndex(L => L.id === levelDragState.id);
       if (i >= 0 && levels[i].price !== price) {
@@ -1666,8 +1672,9 @@
       }
     }
 
-    // 2) drag trendline with intelligent extension
+    // 2) drag trendline with intelligent extension  
     if (trendDragState.isDragging && trendDragState.id && time != null && Number.isFinite(price)) {
+      console.log('[EOD] 🎯 Processing trendline drag - Time:', time, 'Price:', price);
       const arr = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
       const idx = arr.findIndex(t => t.id === trendDragState.id);
       if (idx >= 0) {
