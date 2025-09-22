@@ -3986,6 +3986,179 @@
         log(`🎯 TREND CROSS: ${T.dir.includes('up') ? 'Price crossed ABOVE trendline' : 'Price crossed BELOW trendline'}`);
       }
     });
+    
+    // CRITICAL: Evaluate stored alerts against current conditions
+    evaluateAlerts(next, emaArr, bb, levels, trends);
+  }
+
+  // ================================================
+  // ALERT EVALUATION SYSTEM (CRITICAL MISSING PIECE)
+  // ================================================
+  
+  function evaluateAlerts(currentBar, emaArray, bbData, levels, trendlines) {
+    const alerts = JSON.parse(localStorage.getItem('eod-alerts') || '[]');
+    const currentPrice = currentBar.close;
+    const currentTime = currentBar.time;
+    
+    console.log('[EOD] 🔔 Evaluating', alerts.length, 'alerts against price', currentPrice.toFixed(2));
+    
+    alerts.forEach(alert => {
+      // Skip if alert already triggered
+      if (alert.triggered) return;
+      
+      // Skip if wrong symbol/timeframe
+      if (alert.symbol !== currentSymbol || alert.timeframe !== currentTimeframe) return;
+      
+      let targetValue = null;
+      let alertName = '';
+      
+      // Calculate current target value based on alert type
+      switch(alert.type) {
+        case 'level':
+          targetValue = alert.price;
+          alertName = `Level $${targetValue.toFixed(2)}`;
+          break;
+          
+        case 'trendline':
+          // Calculate current trendline position
+          const trendline = trendlines.find(t => t.id === alert.id);
+          if (trendline) {
+            // Linear interpolation: y = y1 + (y2-y1) * (x-x1)/(x2-x1)
+            const { startTime, startPrice, endTime, endPrice } = alert.start ? alert : trendline;
+            const ratio = (currentTime - startTime) / (endTime - startTime);
+            targetValue = startPrice + (endPrice - startPrice) * ratio;
+            alertName = `Trendline`;
+          }
+          break;
+          
+        case 'ema':
+          // Get current EMA value
+          if (emaArray && emaArray.length > 0) {
+            const currentEMA = emaArray[emaArray.length - 1];
+            targetValue = currentEMA.value;
+            alertName = `EMA(${alert.period || 200})`;
+          }
+          break;
+          
+        case 'bb':
+          // Get current BB band value
+          if (bbData && bbData[alert.band] && bbData[alert.band].length > 0) {
+            const currentBB = bbData[alert.band][bbData[alert.band].length - 1];
+            targetValue = currentBB.value;
+            alertName = `BB ${alert.band.charAt(0).toUpperCase() + alert.band.slice(1)} Band`;
+          }
+          break;
+      }
+      
+      if (targetValue === null) return;
+      
+      // Check if alert condition is met
+      let triggered = false;
+      if (alert.direction === 'above' && currentPrice > targetValue) {
+        triggered = true;
+      } else if (alert.direction === 'below' && currentPrice < targetValue) {
+        triggered = true;
+      }
+      
+      if (triggered) {
+        // Mark alert as triggered
+        alert.triggered = true;
+        
+        // Show popup notification
+        showAlertPopup(alert, alertName, targetValue, currentPrice);
+        
+        console.log(`[EOD] 🚨 ALERT TRIGGERED: ${alertName} - Price ${currentPrice.toFixed(2)} closed ${alert.direction} ${targetValue.toFixed(2)}`);
+      }
+    });
+    
+    // Save updated alerts back to localStorage
+    localStorage.setItem('eod-alerts', JSON.stringify(alerts));
+  }
+  
+  function showAlertPopup(alert, alertName, targetValue, currentPrice) {
+    // Create popup notification
+    const popup = document.createElement('div');
+    popup.className = 'alert-popup';
+    popup.innerHTML = `
+      <div class="alert-popup-content">
+        <div class="alert-popup-header">🚨 ALERT TRIGGERED</div>
+        <div class="alert-popup-body">
+          <strong>${alertName}</strong><br>
+          Price ${currentPrice.toFixed(2)} closed ${alert.direction} ${targetValue.toFixed(2)}<br>
+          <small>Symbol: ${alert.symbol} (${alert.timeframe})</small>
+        </div>
+        <button onclick="this.parentElement.parentElement.remove()" class="alert-popup-close">×</button>
+      </div>
+    `;
+    
+    // Add popup styles if not already added
+    if (!document.getElementById('alert-popup-styles')) {
+      const style = document.createElement('style');
+      style.id = 'alert-popup-styles';
+      style.textContent = `
+        .alert-popup {
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          z-index: 10000;
+          background: linear-gradient(135deg, #dc2626, #ef4444);
+          border: 2px solid #fca5a5;
+          border-radius: 12px;
+          color: white;
+          min-width: 300px;
+          box-shadow: 0 10px 25px rgba(220, 38, 38, 0.3);
+          animation: slideIn 0.3s ease-out;
+        }
+        .alert-popup-content {
+          padding: 16px;
+          position: relative;
+        }
+        .alert-popup-header {
+          font-weight: bold;
+          font-size: 16px;
+          margin-bottom: 8px;
+          text-align: center;
+        }
+        .alert-popup-body {
+          font-size: 14px;
+          line-height: 1.4;
+        }
+        .alert-popup-close {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          background: rgba(255,255,255,0.2);
+          border: none;
+          color: white;
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          cursor: pointer;
+          font-size: 16px;
+          line-height: 1;
+        }
+        .alert-popup-close:hover {
+          background: rgba(255,255,255,0.3);
+        }
+        @keyframes slideIn {
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    
+    document.body.appendChild(popup);
+    
+    // Auto-remove popup after 10 seconds
+    setTimeout(() => {
+      if (popup.parentElement) {
+        popup.remove();
+      }
+    }, 10000);
+    
+    // Log to console as well
+    log(`🚨 ALERT: ${alertName} - Price closed ${alert.direction} target!`);
   }
 
   // ================================================
