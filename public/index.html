@@ -114,6 +114,71 @@
     .color-option.active { border-color:var(--accent); }
     .color-option:hover { transform:scale(1.1); }
 
+    /* Context Menu Styling */
+    #contextMenu {
+      position: fixed;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      z-index: 1000;
+      min-width: 200px;
+      padding: 6px 0;
+      display: none;
+      font-size: 13px;
+    }
+    
+    .context-menu-item {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: var(--text);
+      width: 100%;
+      text-align: left;
+      gap: 8px;
+      transition: background-color 0.1s ease;
+    }
+    
+    .context-menu-item:hover {
+      background: rgba(59, 130, 246, 0.15);
+    }
+    
+    .context-menu-item:active {
+      background: rgba(59, 130, 246, 0.25);
+    }
+    
+    .context-menu-item.destructive {
+      color: var(--bad);
+    }
+    
+    .context-menu-item.destructive:hover {
+      background: rgba(239, 68, 68, 0.15);
+    }
+    
+    .context-menu-separator {
+      height: 1px;
+      background: var(--border);
+      margin: 4px 0;
+    }
+    
+    .context-menu-icon {
+      font-size: 14px;
+      width: 16px;
+      text-align: center;
+    }
+    
+    .context-menu-label {
+      flex: 1;
+    }
+    
+    .context-menu-value {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
     /* Responsive */
     @media (max-width: 1200px) {
       main { grid-template-columns:1fr 280px; }
@@ -256,6 +321,11 @@
     </div>
   </div>
 
+  <!-- Context Menu -->
+  <div id="contextMenu">
+    <!-- Menu items will be dynamically populated -->
+  </div>
+
 
 <script>
 (function () {
@@ -324,6 +394,50 @@
     return Math.sqrt(dist2(P, proj));
   }
 
+  // ==== INDICATOR HIT TESTING ====
+  function detectIndicatorClick(px, py, tolerancePx = 8) {
+    if (!chart || !candleSeries) return null;
+    
+    const price = candleSeries.coordinateToPrice(py);
+    if (!price || !tfBars || tfBars.length === 0) return null;
+    
+    const time = chart.timeScale().coordinateToTime(px);
+    if (!time) return null;
+    
+    // Find nearest bar
+    const barIndex = tfBars.findIndex(bar => Math.abs(bar.time - time) <= 86400); // within 1 day
+    if (barIndex === -1) return null;
+    
+    const bar = tfBars[barIndex];
+    
+    // Check EMA(200) if visible
+    if (indicators.ema200 && bar.ema200) {
+      const emaY = candleSeries.priceToCoordinate(bar.ema200);
+      if (emaY && Math.abs(py - emaY) <= tolerancePx) {
+        return { type: 'ema', value: bar.ema200, name: 'EMA(200)' };
+      }
+    }
+    
+    // Check Bollinger Bands if visible
+    if (indicators.bb20 && bar.bb) {
+      const upperY = candleSeries.priceToCoordinate(bar.bb.upper);
+      const middleY = candleSeries.priceToCoordinate(bar.bb.middle);
+      const lowerY = candleSeries.priceToCoordinate(bar.bb.lower);
+      
+      if (upperY && Math.abs(py - upperY) <= tolerancePx) {
+        return { type: 'bb', band: 'upper', value: bar.bb.upper, name: 'BB Upper' };
+      }
+      if (middleY && Math.abs(py - middleY) <= tolerancePx) {
+        return { type: 'bb', band: 'middle', value: bar.bb.middle, name: 'BB Middle' };
+      }
+      if (lowerY && Math.abs(py - lowerY) <= tolerancePx) {
+        return { type: 'bb', band: 'lower', value: bar.bb.lower, name: 'BB Lower' };
+      }
+    }
+    
+    return null;
+  }
+
   function hitTestTrendlines(px, py, tolerancePx = 10){
     for (const [id, rec] of trendSeriesById.entries()){
       const t = rec.data;
@@ -345,6 +459,332 @@
       if (Math.abs(py - y) <= tolerancePx) return { id };
     }
     return null;
+  }
+
+  // ==== CONTEXT MENU SYSTEM ====
+  let contextMenuState = {
+    isVisible: false,
+    targetId: null,
+    targetType: null,
+    targetData: null
+  };
+
+  function showContextMenu(x, y, targetType, targetData = null) {
+    const menu = $('#contextMenu');
+    
+    // Clear previous content
+    menu.innerHTML = '';
+    
+    // Generate menu items based on target type
+    let menuItems = [];
+    
+    if (targetType === 'trendline') {
+      const trendline = targetData;
+      menuItems = [
+        { icon: '🔔', label: 'Add alert on Trendline', action: () => addAlert('trendline', trendline) },
+        { icon: '⚙️', label: 'Trendline settings', action: () => openTrendlineSettings(trendline) },
+        { icon: '👁️', label: 'Show/hide trendline', action: () => toggleTrendlineVisibility(trendline) },
+        { icon: '📏', label: 'Extend trendline', action: () => extendTrendline(trendline) },
+        { separator: true },
+        { icon: '🗑️', label: 'Remove trendline', action: () => removeTrendline(trendline), destructive: true }
+      ];
+    } else if (targetType === 'level') {
+      const level = targetData;
+      menuItems = [
+        { icon: '🔔', label: `Add alert on Level at $${level.price.toFixed(2)}`, action: () => addAlert('level', level) },
+        { icon: '✏️', label: 'Edit level price', action: () => editLevelPrice(level) },
+        { icon: '📏', label: 'Extend level', action: () => extendLevel(level) },
+        { separator: true },
+        { icon: '🗑️', label: 'Remove level', action: () => removeLevel(level), destructive: true }
+      ];
+    } else if (targetType === 'ema') {
+      const ema = targetData;
+      const valueText = ema && ema.value ? ema.value.toFixed(2) : 'N/A';
+      menuItems = [
+        { icon: '🔔', label: `Add alert on EMA(200) at ${valueText}`, action: () => addAlert('ema', ema) },
+        { icon: '⚙️', label: 'EMA settings', action: () => openEMASettings() },
+        { icon: '👁️', label: 'Show/hide EMA', action: () => toggleEMA() }
+      ];
+    } else if (targetType === 'bb') {
+      const bb = targetData;
+      const valueText = bb && bb.value ? bb.value.toFixed(2) : 'N/A';
+      const bandName = bb && bb.name ? bb.name : 'BB';
+      menuItems = [
+        { icon: '🔔', label: `Add alert on ${bandName} at ${valueText}`, action: () => addAlert('bb_' + (bb.band || 'upper'), bb) },
+        { icon: '⚙️', label: 'BB settings', action: () => openBBSettings() },
+        { icon: '👁️', label: 'Show/hide BB', action: () => toggleBB() }
+      ];
+    }
+    
+    // Build menu HTML
+    menuItems.forEach(item => {
+      if (item.separator) {
+        const separator = document.createElement('div');
+        separator.className = 'context-menu-separator';
+        menu.appendChild(separator);
+      } else {
+        const menuItem = document.createElement('button');
+        menuItem.className = 'context-menu-item' + (item.destructive ? ' destructive' : '');
+        
+        menuItem.innerHTML = `
+          <span class="context-menu-icon">${item.icon}</span>
+          <span class="context-menu-label">${item.label}</span>
+        `;
+        
+        menuItem.addEventListener('click', (e) => {
+          e.preventDefault();
+          hideContextMenu();
+          item.action();
+        });
+        
+        menu.appendChild(menuItem);
+      }
+    });
+    
+    // Position menu with viewport bounds checking
+    const rect = menu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    // Adjust horizontal position
+    let menuX = x;
+    if (x + 220 > viewportWidth) { // 220px is approximate menu width
+      menuX = x - 220;
+    }
+    
+    // Adjust vertical position
+    let menuY = y;
+    const estimatedHeight = menuItems.filter(i => !i.separator).length * 32 + menuItems.filter(i => i.separator).length * 9 + 12;
+    if (y + estimatedHeight > viewportHeight) {
+      menuY = y - estimatedHeight;
+    }
+    
+    // Apply position and show
+    menu.style.left = Math.max(0, menuX) + 'px';
+    menu.style.top = Math.max(0, menuY) + 'px';
+    menu.style.display = 'block';
+    
+    contextMenuState = {
+      isVisible: true,
+      targetId: targetData?.id || null,
+      targetType,
+      targetData
+    };
+  }
+  
+  function hideContextMenu() {
+    const menu = $('#contextMenu');
+    menu.style.display = 'none';
+    contextMenuState = {
+      isVisible: false,
+      targetId: null,
+      targetType: null,
+      targetData: null
+    };
+  }
+  
+  // ==== CONTEXT MENU ACTION HANDLERS ====
+  function addAlert(type, data) {
+    // Placeholder for alert functionality
+    let message = '';
+    switch(type) {
+      case 'trendline':
+        message = 'Alert on trendline (coming soon)';
+        break;
+      case 'level':
+        message = `Alert on level at $${data.price.toFixed(2)} (coming soon)`;
+        break;
+      case 'ema':
+        const emaValue = data && data.value ? data.value.toFixed(2) : 'N/A';
+        message = `Alert on EMA(200) at ${emaValue} (coming soon)`;
+        break;
+      case 'bb_upper':
+      case 'bb_middle':
+      case 'bb_lower':
+        const bbValue = data && data.value ? data.value.toFixed(2) : 'N/A';
+        const bbName = data && data.name ? data.name : 'BB';
+        message = `Alert on ${bbName} at ${bbValue} (coming soon)`;
+        break;
+    }
+    log(message);
+  }
+  
+  function openTrendlineSettings(trendline) {
+    log('Trendline settings (coming soon)');
+  }
+  
+  function toggleTrendlineVisibility(trendline) {
+    // Toggle visibility of specific trendline
+    const trendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    const index = trendlines.findIndex(t => t.id === trendline.id);
+    if (index >= 0) {
+      trendlines[index].visible = !trendlines[index].visible;
+      saveTrendlinesForSymbol(currentSymbol, currentTimeframe, trendlines);
+      drawAllTrendlines();
+      log(`Trendline ${trendlines[index].visible ? 'shown' : 'hidden'}`);
+    }
+  }
+  
+  function extendTrendline(trendline) {
+    log('Extend trendline (coming soon)');
+  }
+  
+  function removeTrendline(trendline) {
+    const trendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    const index = trendlines.findIndex(t => t.id === trendline.id);
+    if (index >= 0) {
+      // Remove from cache and chart
+      const rec = trendSeriesById.get(trendline.id);
+      if (rec) {
+        chart.removeSeries(rec.series);
+        trendSeriesById.delete(trendline.id);
+      }
+      
+      // Remove from storage
+      trendlines.splice(index, 1);
+      saveTrendlinesForSymbol(currentSymbol, currentTimeframe, trendlines);
+      
+      // Update UI
+      updateTrendlinesList();
+      evaluateCurrentSignals();
+      log('Trendline removed');
+    }
+  }
+  
+  function editLevelPrice(level) {
+    const newPrice = prompt('Enter new price:', level.price.toFixed(2));
+    if (newPrice !== null && !isNaN(newPrice) && parseFloat(newPrice) > 0) {
+      const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+      const index = levels.findIndex(l => l.id === level.id);
+      if (index >= 0) {
+        levels[index].price = parseFloat(newPrice);
+        saveLevelsForSymbol(currentSymbol, currentTimeframe, levels);
+        drawAllLevels();
+        updateLevelsList();
+        evaluateCurrentSignals();
+        log(`Level price updated to $${newPrice}`);
+      }
+    }
+  }
+  
+  function extendLevel(level) {
+    log('Extend level (coming soon)');
+  }
+  
+  function removeLevel(level) {
+    const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+    const index = levels.findIndex(l => l.id === level.id);
+    if (index >= 0) {
+      // Remove from cache and chart
+      const rec = levelLineById.get(level.id);
+      if (rec) {
+        candleSeries.removePriceLine(rec.line);
+        levelLineById.delete(level.id);
+      }
+      
+      // Remove from storage
+      levels.splice(index, 1);
+      saveLevelsForSymbol(currentSymbol, currentTimeframe, levels);
+      
+      // Update UI
+      updateLevelsList();
+      evaluateCurrentSignals();
+      log('Level removed');
+    }
+  }
+  
+  function openEMASettings() {
+    log('EMA settings (coming soon)');
+  }
+  
+  function toggleEMA() {
+    indicators.ema200 = !indicators.ema200;
+    localStorage.setItem('eod-indicators', JSON.stringify(indicators));
+    
+    // Update toggle UI
+    const toggle = $('#ema-toggle');
+    if (indicators.ema200) {
+      toggle.classList.add('active');
+    } else {
+      toggle.classList.remove('active');
+    }
+    
+    // Redraw chart
+    drawAllIndicators();
+    log(`EMA(200) ${indicators.ema200 ? 'enabled' : 'disabled'}`);
+  }
+  
+  function openBBSettings() {
+    log('Bollinger Bands settings (coming soon)');
+  }
+  
+  function toggleBB() {
+    indicators.bb20 = !indicators.bb20;
+    localStorage.setItem('eod-indicators', JSON.stringify(indicators));
+    
+    // Update toggle UI
+    const toggle = $('#bb-toggle');
+    if (indicators.bb20) {
+      toggle.classList.add('active');
+    } else {
+      toggle.classList.remove('active');
+    }
+    
+    // Redraw chart
+    drawAllIndicators();
+    log(`Bollinger Bands ${indicators.bb20 ? 'enabled' : 'disabled'}`);
+  }
+  
+  // ==== LINE SELECTION SYSTEM (FOR COMPATIBILITY) ====
+  function selectLine(lineInfo) {
+    selectedLine = lineInfo;
+    isLineSelected = true;
+    updateLineHandles();
+    
+    // Update UI to show line controls
+    const lineControls = $('#line-controls');
+    if (lineControls) {
+      lineControls.style.display = 'block';
+    }
+  }
+  
+  function deselectLine() {
+    selectedLine = null;
+    isLineSelected = false;
+    updateLineHandles();
+    
+    // Hide line controls
+    const lineControls = $('#line-controls');
+    if (lineControls) {
+      lineControls.style.display = 'none';
+    }
+  }
+  
+  function updateLineHandles() {
+    // Clear existing handles
+    lineHandles.forEach(handle => {
+      try {
+        if (handle.series) chart.removeSeries(handle.series);
+      } catch (e) {}
+    });
+    lineHandles = [];
+    
+    // Add handles for selected line (placeholder - would need implementation)
+    if (selectedLine && selectedLine.type === 'trendline') {
+      // Visual feedback for selected trendline
+      const trendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+      trendlines.forEach(t => {
+        t.selected = (t.id === selectedLine.id);
+      });
+      drawAllTrendlines();
+    } else if (selectedLine && selectedLine.type === 'level') {
+      // Visual feedback for selected level
+      const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+      levels.forEach(l => {
+        l.selected = (l.id === selectedLine.id);
+      });
+      drawAllLevels();
+    }
   }
 
   // ==== PERFORMANCE FREEZING DURING DRAG ====
@@ -600,6 +1040,12 @@
           const indicatorClick = detectIndicatorClick(px, py);
           if (indicatorClick) {
             log(`Clicked on ${indicatorClick.type} indicator`);
+          } else {
+            // Deselect any selected line if clicking on empty space
+            if (selectedLine) {
+              deselectLine();
+              log('Line deselected');
+            }
           }
         }
       }
@@ -630,6 +1076,65 @@
     lastPointer = null;
     chartContainer.style.cursor = '';
   }
+
+  // ==== RIGHT-CLICK CONTEXT MENU HANDLER ====
+  function onContextMenu(e) {
+    e.preventDefault(); // Prevent default browser context menu
+    
+    const rect = document.getElementById('chart').getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    
+    // Use existing hit testing logic to determine what was right-clicked
+    const trendlineHit = hitTestTrendlines(px, py);
+    const levelHit = hitTestLevel(px, py);
+    const indicatorHit = detectIndicatorClick(px, py);
+    
+    let targetType = null;
+    let targetData = null;
+    
+    if (trendlineHit) {
+      targetType = 'trendline';
+      targetData = trendSeriesById.get(trendlineHit.id)?.data;
+    } else if (levelHit) {
+      targetType = 'level';
+      targetData = levelLineById.get(levelHit.id)?.data;
+    } else if (indicatorHit) {
+      if (indicatorHit.type === 'ema') {
+        targetType = 'ema';
+        targetData = indicatorHit;
+      } else if (indicatorHit.type === 'bb') {
+        targetType = 'bb';
+        targetData = indicatorHit;
+      }
+    }
+    
+    // Only show context menu if we clicked on something
+    if (targetType && targetData) {
+      // Convert to screen coordinates
+      const screenX = e.clientX;
+      const screenY = e.clientY;
+      
+      showContextMenu(screenX, screenY, targetType, targetData);
+    }
+  }
+  
+  // ==== CLICK OUTSIDE TO CLOSE CONTEXT MENU ====
+  function onDocumentClick(e) {
+    const menu = $('#contextMenu');
+    if (contextMenuState.isVisible && !menu.contains(e.target)) {
+      hideContextMenu();
+    }
+  }
+
+  // ---- Chart init
+  // Add event listeners for context menu
+  document.addEventListener('click', onDocumentClick);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && contextMenuState.isVisible) {
+      hideContextMenu();
+    }
+  });
 
   // ---- Chart init
   const chart = LightweightCharts.createChart(document.getElementById('chart'), {
@@ -1686,6 +2191,7 @@
     chartContainer.addEventListener('pointermove', onPointerMove, { passive: true });
     chartContainer.addEventListener('pointerup', onPointerUp);
     chartContainer.addEventListener('pointercancel', onPointerUp);
+    chartContainer.addEventListener('contextmenu', onContextMenu);
 
     // Keep mousemove only for trendline preview (non-performance critical)
     chartContainer.addEventListener('mousemove', (event) => {
@@ -1773,7 +2279,8 @@
             type: 'ema',
             id: 'ema200',
             price: emaValue,
-            currentValue: emaValue
+            value: emaValue,
+            name: 'EMA(200)'
           };
         }
       }
@@ -1790,19 +2297,23 @@
         
         if (upperY !== null && Math.abs(clickY - upperY) <= tolerance) {
           return {
-            type: 'bb_upper',
+            type: 'bb',
+            band: 'upper',
             id: 'bb_upper',
             price: upperValue,
-            currentValue: upperValue
+            value: upperValue,
+            name: 'BB Upper'
           };
         }
         
         if (lowerY !== null && Math.abs(clickY - lowerY) <= tolerance) {
           return {
-            type: 'bb_lower',
+            type: 'bb',
+            band: 'lower', 
             id: 'bb_lower',
             price: lowerValue,
-            currentValue: lowerValue
+            value: lowerValue,
+            name: 'BB Lower'
           };
         }
       }
