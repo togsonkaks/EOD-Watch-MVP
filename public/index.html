@@ -2346,17 +2346,35 @@
   });
 
   // ===== INITIALIZE OVERLAY SYSTEM AFTER CHART AND SERIES CREATION =====
-  setTimeout(() => {
-    if (typeof initializeDrawingOverlay === 'function') {
-      // Load stored drawings first
-      loadOverlayDrawingsFromStorage();
+  function attemptOverlayInitialization(retries = 3) {
+    try {
+      // Check if overlay canvas exists before initializing
+      const overlayCanvas = document.getElementById('drawing-overlay');
+      if (!overlayCanvas) {
+        if (retries > 0) {
+          console.log('[EOD] ⏳ Overlay canvas not ready, retrying...', retries, 'attempts left');
+          setTimeout(() => attemptOverlayInitialization(retries - 1), 100);
+          return;
+        }
+        console.error('[EOD] ❌ Drawing overlay canvas not found after all retries');
+        return;
+      }
       
-      // Initialize overlay system
-      initializeDrawingOverlay();
-      setupOverlayEventHandling();
-      console.log('[EOD] 🎯 Overlay system initialized after chart setup');
+      if (typeof initializeDrawingOverlay === 'function') {
+        // Load stored drawings first
+        loadOverlayDrawingsFromStorage();
+        
+        // Initialize overlay system
+        initializeDrawingOverlay();
+        setupOverlayEventHandling();
+        console.log('[EOD] ✅ Overlay system initialized successfully');
+      }
+    } catch (error) {
+      console.error('[EOD] ❌ Overlay initialization failed:', error);
     }
-  }, 100);
+  }
+  
+  setTimeout(() => attemptOverlayInitialization(), 200);
 
   // ===== ISOLATED DRAWING OVERLAY INITIALIZATION =====
   function initializeDrawingOverlay() {
@@ -2406,6 +2424,10 @@
 
   // ===== EXCLUSIVE OVERLAY EVENT HANDLING =====
   function setupOverlayEventHandling() {
+    if (!overlayCanvas) {
+      console.error('[EOD] ❌ Cannot setup overlay events - canvas not found');
+      return;
+    }
     
     overlayCanvas.addEventListener('pointerdown', (e) => {
       console.log('[EOD] 🎯 Overlay canvas clicked! Drawing mode:', unifiedDragState.drawingMode, 'Tool:', unifiedDragState.drawingTool);
@@ -3741,9 +3763,11 @@
 
   async function loadSymbol(sym, timeframe = currentTimeframe) {
     try {
-      // Show loading state
-      $('#loading-overlay').classList.add('show');
-      $('#status-dot').className = 'status-dot status-loading';
+      // Show loading state with null checks
+      const loadingOverlay = document.getElementById('loading-overlay');
+      const statusDot = document.getElementById('status-dot');
+      if (loadingOverlay) loadingOverlay.classList.add('show');
+      if (statusDot) statusDot.className = 'status-dot status-loading';
       log(`Loading ${sym} (${timeframe})…`);
       
       // Always fetch daily data first (full 11+ year history)
@@ -3857,10 +3881,12 @@
       
     } catch (e) {
       log('Load failed: ' + e.message);
-      $('#status-dot').className = 'status-dot status-error';
+      const statusDot = document.getElementById('status-dot');
+      if (statusDot) statusDot.className = 'status-dot status-error';
     } finally {
-      // Hide loading state
-      $('#loading-overlay').classList.remove('show');
+      // Hide loading state with null checks
+      const loadingOverlay = document.getElementById('loading-overlay');
+      if (loadingOverlay) loadingOverlay.classList.remove('show');
     }
   }
 
