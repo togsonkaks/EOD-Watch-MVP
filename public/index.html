@@ -2203,6 +2203,13 @@
       } else if (contextMenuState.isVisible) {
         hideContextMenu();
       }
+    } else if (e.key === 'Delete' || e.keyCode === 46) {
+      // Handle Delete key for selected drawings
+      if (selectedLine) {
+        e.preventDefault(); // Prevent any default browser delete behavior
+        deleteSelectedLine();
+        console.log('[EOD] 🗑️ Keyboard delete pressed - line deleted');
+      }
     }
   });
   
