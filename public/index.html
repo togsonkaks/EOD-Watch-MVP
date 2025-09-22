@@ -445,6 +445,8 @@
       <div class="loading-overlay" id="loading-overlay">
         <div>Loading chart data...</div>
       </div>
+      <!-- ISOLATED DRAWING OVERLAY - Completely independent from chart series -->
+      <canvas id="drawing-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 100; pointer-events: none;"></canvas>
     </section>
 
     <!-- side panel -->
@@ -599,6 +601,21 @@
   let currentTimeframe = localStorage.getItem('eod-current-timeframe') || '1D';
   let indicators = JSON.parse(localStorage.getItem('eod-indicators') || '{"ema200": true, "bb20": false}');
   let dailyBars = []; // Store raw daily data for resampling
+  
+  // ===== ISOLATED DRAWING OVERLAY SYSTEM =====
+  let overlayCanvas = null;
+  let overlayCtx = null;
+  let overlayDrawings = {}; // Organized by symbol+timeframe: {levels: [], trendlines: []}
+  let overlayState = {
+    drawingMode: false,
+    drawingTool: 'level', // 'level' or 'trendline'
+    trendlineStart: null,
+    selectedDrawing: null,
+    isDragging: false,
+    dragOffset: { x: 0, y: 0 }
+  };
+  
+  // Legacy drawing storage (will be migrated)
   let levels = {}; // Start fresh - now organized by symbol+timeframe
   let trendlines = {}; // Start fresh - now organized by symbol+timeframe
   let drawingMode = false;
@@ -1938,6 +1955,232 @@
   const bbUpperSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
   const bbMiddleSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1, lineStyle: 2 });
   const bbLowerSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1 });
+
+  // ===== INITIALIZE OVERLAY SYSTEM AFTER CHART AND SERIES CREATION =====
+  setTimeout(() => {
+    if (typeof initializeDrawingOverlay === 'function') {
+      initializeDrawingOverlay();
+      setupOverlayEventHandling();
+      console.log('[EOD] 🎯 Overlay system initialized after chart setup');
+    }
+  }, 100);
+
+  // ===== ISOLATED DRAWING OVERLAY INITIALIZATION =====
+  function initializeDrawingOverlay() {
+    overlayCanvas = document.getElementById('drawing-overlay');
+    if (!overlayCanvas) {
+      console.error('[EOD] ❌ Drawing overlay canvas not found');
+      return;
+    }
+    
+    overlayCtx = overlayCanvas.getContext('2d');
+    
+    // Set up high-DPI canvas with proper DPR handling
+    function resizeOverlayCanvas() {
+      const rect = overlayCanvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      overlayCanvas.width = rect.width * dpr;
+      overlayCanvas.height = rect.height * dpr;
+      // CRITICAL: Reset transform before scaling to prevent accumulation
+      overlayCtx.setTransform(1, 0, 0, 1, 0, 0);
+      overlayCtx.scale(dpr, dpr);
+      overlayCanvas.style.width = rect.width + 'px';
+      overlayCanvas.style.height = rect.height + 'px';
+      renderOverlay();
+    }
+    
+    resizeOverlayCanvas();
+    
+    // Set up ResizeObserver for responsive canvas
+    const resizeObserver = new ResizeObserver(entries => {
+      resizeOverlayCanvas();
+    });
+    resizeObserver.observe(document.getElementById('chart'));
+    
+    // Subscribe to ALL chart changes for complete re-rendering
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => renderOverlay());
+    
+    // Subscribe to chart size changes for Y coordinate updates
+    const originalResize = chart.resize.bind(chart);
+    chart.resize = (w, h) => {
+      const result = originalResize(w, h);
+      renderOverlay();
+      return result;
+    };
+    
+    console.log('[EOD] ✅ Drawing overlay initialized');
+  }
+
+  // ===== EXCLUSIVE OVERLAY EVENT HANDLING =====
+  function setupOverlayEventHandling() {
+    // Toggle pointer events based on drawing mode
+    function updatePointerEvents() {
+      overlayCanvas.style.pointerEvents = overlayState.drawingMode ? 'auto' : 'none';
+    }
+    
+    overlayCanvas.addEventListener('pointerdown', (e) => {
+      if (!overlayState.drawingMode) return;
+      
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      
+      // Disable chart interactions during drawing
+      chart.applyOptions({ handleScroll: false, handleScale: false });
+      
+      const rect = overlayCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      const logical = chartToLogical(x);
+      const price = chartToPrice(y);
+      
+      if (logical !== null && price !== null && !isNaN(logical) && !isNaN(price)) {
+        if (overlayState.drawingTool === 'level') {
+          overlayAddLevel(price);
+          overlayState.drawingMode = false;
+          $('#level-tool').classList.remove('active');
+          document.body.classList.remove('drawing-mode');
+          updatePointerEvents();
+          console.log('[EOD] ✅ Overlay level completed');
+        } else if (overlayState.drawingTool === 'trendline') {
+          if (!overlayState.trendlineStart) {
+            overlayState.trendlineStart = { logical, price };
+            console.log('[EOD] Trendline started, click second point');
+          } else {
+            overlayAddTrendline(
+              overlayState.trendlineStart.logical, overlayState.trendlineStart.price,
+              logical, price
+            );
+            overlayState.trendlineStart = null;
+            overlayState.drawingMode = false;
+            $('#trendline-tool').classList.remove('active');
+            document.body.classList.remove('drawing-mode');
+            updatePointerEvents();
+            console.log('[EOD] ✅ Overlay trendline completed');
+          }
+        }
+      }
+      
+      // Re-enable chart interactions
+      chart.applyOptions({ handleScroll: true, handleScale: true });
+    }, { capture: true });
+    
+    // Update pointer events when drawing mode changes
+    const originalLevelClick = $('#level-tool').onclick;
+    const originalTrendlineClick = $('#trendline-tool').onclick;
+    
+    $('#level-tool').addEventListener('click', updatePointerEvents);
+    $('#trendline-tool').addEventListener('click', updatePointerEvents);
+    
+    console.log('[EOD] ✅ Overlay event handling setup');
+  }
+
+  // ===== ISOLATED COORDINATE SYSTEM =====
+  function getDrawingKey(symbol, timeframe) {
+    return `${symbol}_${timeframe}`;
+  }
+
+  function getDrawingsForSymbol(symbol, timeframe) {
+    const key = getDrawingKey(symbol, timeframe);
+    if (!overlayDrawings[key]) {
+      overlayDrawings[key] = { levels: [], trendlines: [] };
+    }
+    return overlayDrawings[key];
+  }
+
+  function chartToLogical(x) {
+    return chart.timeScale().coordinateToLogical(x);
+  }
+
+  function logicalToChart(logical) {
+    return chart.timeScale().logicalToCoordinate(logical);
+  }
+
+  function chartToPrice(y) {
+    return candleSeries.coordinateToPrice(y);
+  }
+
+  function priceToChart(price) {
+    return candleSeries.priceToCoordinate(price);
+  }
+
+  // ===== OVERLAY RENDERING SYSTEM =====
+  function renderOverlay() {
+    if (!overlayCanvas || !overlayCtx) return;
+    
+    // Clear canvas
+    const rect = overlayCanvas.getBoundingClientRect();
+    overlayCtx.clearRect(0, 0, rect.width, rect.height);
+    
+    // Get current drawings
+    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
+    
+    // Render levels
+    overlayCtx.strokeStyle = '#60a5fa';
+    overlayCtx.lineWidth = 2;
+    drawings.levels.forEach(level => {
+      const y = priceToChart(level.price);
+      if (y !== null && !isNaN(y)) {
+        overlayCtx.beginPath();
+        overlayCtx.moveTo(0, y);
+        overlayCtx.lineTo(rect.width, y);
+        overlayCtx.stroke();
+      }
+    });
+    
+    // Render trendlines
+    overlayCtx.strokeStyle = '#f59e0b';
+    overlayCtx.lineWidth = 2;
+    drawings.trendlines.forEach(trendline => {
+      const x1 = logicalToChart(trendline.x1Logical);
+      const y1 = priceToChart(trendline.y1Price);
+      const x2 = logicalToChart(trendline.x2Logical);
+      const y2 = priceToChart(trendline.y2Price);
+      
+      if (x1 !== null && y1 !== null && x2 !== null && y2 !== null &&
+          !isNaN(x1) && !isNaN(y1) && !isNaN(x2) && !isNaN(y2)) {
+        overlayCtx.beginPath();
+        overlayCtx.moveTo(x1, y1);
+        overlayCtx.lineTo(x2, y2);
+        overlayCtx.stroke();
+      }
+    });
+    
+    // Render selection handles if needed
+    if (overlayState.selectedDrawing) {
+      renderSelectionHandles(overlayState.selectedDrawing);
+    }
+  }
+
+  function renderSelectionHandles(drawing) {
+    overlayCtx.fillStyle = '#ffffff';
+    overlayCtx.strokeStyle = '#000000';
+    overlayCtx.lineWidth = 1;
+    
+    if (drawing.type === 'level') {
+      const y = priceToChart(drawing.price);
+      if (y !== null && !isNaN(y)) {
+        const rect = overlayCanvas.getBoundingClientRect();
+        const x = rect.width / 2;
+        overlayCtx.fillRect(x - 4, y - 4, 8, 8);
+        overlayCtx.strokeRect(x - 4, y - 4, 8, 8);
+      }
+    } else if (drawing.type === 'trendline') {
+      const x1 = logicalToChart(drawing.x1Logical);
+      const y1 = priceToChart(drawing.y1Price);
+      const x2 = logicalToChart(drawing.x2Logical);
+      const y2 = priceToChart(drawing.y2Price);
+      
+      if (x1 !== null && y1 !== null && x2 !== null && y2 !== null &&
+          !isNaN(x1) && !isNaN(y1) && !isNaN(x2) && !isNaN(y2)) {
+        // Draw handles at both endpoints
+        overlayCtx.fillRect(x1 - 4, y1 - 4, 8, 8);
+        overlayCtx.strokeRect(x1 - 4, y1 - 4, 8, 8);
+        overlayCtx.fillRect(x2 - 4, y2 - 4, 8, 8);
+        overlayCtx.strokeRect(x2 - 4, y2 - 4, 8, 8);
+      }
+    }
+  }
 
   // ---- Indicator calculations
   function ema(values, period) {
@@ -3704,20 +3947,19 @@
     loadSymbol(currentSymbol); // refresh chart
   });
 
-  // Drawing tool buttons
+  // ===== OVERLAY DRAWING TOOL BUTTONS =====
   $('#level-tool').addEventListener('click', () => {
-    if (drawingTool === 'level' && drawingMode) {
+    if (overlayState.drawingTool === 'level' && overlayState.drawingMode) {
       // Turn off drawing mode
-      drawingMode = false;
+      overlayState.drawingMode = false;
       $('#level-tool').classList.remove('active');
       document.body.classList.remove('drawing-mode');
       log('Drawing mode off');
     } else {
       // Switch to level tool
-      disableTrendlinePreview(); // Clean up any preview
-      drawingMode = true;
-      drawingTool = 'level';
-      trendlineStart = null; // Reset trendline state
+      overlayState.drawingTool = 'level';
+      overlayState.drawingMode = true;
+      overlayState.trendlineStart = null;
       $('#level-tool').classList.add('active');
       $('#trendline-tool').classList.remove('active');
       document.body.classList.add('drawing-mode');
@@ -3726,20 +3968,18 @@
   });
 
   $('#trendline-tool').addEventListener('click', () => {
-    if (drawingTool === 'trendline' && drawingMode) {
+    if (overlayState.drawingTool === 'trendline' && overlayState.drawingMode) {
       // Turn off drawing mode
-      drawingMode = false;
-      trendlineStart = null;
-      disableTrendlinePreview();
+      overlayState.drawingMode = false;
+      overlayState.trendlineStart = null;
       $('#trendline-tool').classList.remove('active');
       document.body.classList.remove('drawing-mode');
       log('Drawing mode off');
     } else {
       // Switch to trendline tool
-      disableTrendlinePreview(); // Clean up any existing preview
-      drawingMode = true;
-      drawingTool = 'trendline';
-      trendlineStart = null;
+      overlayState.drawingTool = 'trendline';
+      overlayState.drawingMode = true;
+      overlayState.trendlineStart = null;
       $('#trendline-tool').classList.add('active');
       $('#level-tool').classList.remove('active');
       document.body.classList.add('drawing-mode');
