@@ -413,10 +413,15 @@
     <div class="toolbar-sep"></div>
     <div id="testbox" style="display:flex; gap:6px; align-items:center;">
       <span style="opacity:.7">Test Mode:</span>
+      <button id="testInit">Initialize</button>
       <button id="testStart">Start</button>
       <button id="testStep">Step</button>
       <button id="testStop">Stop</button>
       <button id="testReset">Reset</button>
+      <div class="toolbar-sep"></div>
+      <button id="testSlower">Slower</button>
+      <span id="speedDisplay" style="min-width:60px; text-align:center; font-size:12px; color:var(--muted)">1.0x</span>
+      <button id="testFaster">Faster</button>
     </div>
     <div class="toolbar-sep"></div>
     <div style="display:flex; align-items:center;">
@@ -3754,9 +3759,33 @@
   let TEST_TIMER = null;
   let testBars = [];          // 1m bars we're generating
   let baseFrom = null;        // start from last real close
-  let testSpeedMs = 250;      // 4 bars/sec; tweak to taste
+  let testSpeedMs = 250;      // base speed: 4 bars/sec
+  let speedMultiplier = 1.0;  // current speed multiplier
+  const speedLevels = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0]; // available speed multipliers
+  let currentSpeedIndex = 2;  // start at 1.0x (index 2)
 
   function cloneBar(b){ return { time:b.time, open:b.open, high:b.high, low:b.low, close:b.close }; }
+
+  // Speed control helper functions
+  function getSpeedText() {
+    return `${speedMultiplier}x speed (${Math.round(1000 / (testSpeedMs / speedMultiplier))} bars/sec)`;
+  }
+
+  function updateSpeedDisplay() {
+    document.getElementById('speedDisplay').textContent = `${speedMultiplier}x`;
+  }
+
+  function getCurrentSpeed() {
+    return testSpeedMs / speedMultiplier;
+  }
+
+  function restartTimerWithNewSpeed() {
+    if (TEST_TIMER) {
+      clearInterval(TEST_TIMER);
+      TEST_TIMER = setInterval(testTick, getCurrentSpeed());
+      log(`⏱️ Speed changed to ${getSpeedText()}`);
+    }
+  }
 
   // Random-walk 1m bar around last close; "volBp" = basis points of vol
   function genNextMinute(prevBar, volBp = 25) {
@@ -3907,14 +3936,20 @@
 
   // Test mode controls
   document.getElementById('testStart').onclick = ()=>{
-    if (!testBars.length) testInitFromCurrent();
+    if (!testBars.length) {
+      log('⚠️ Please initialize test mode first');
+      return;
+    }
     if (TEST_TIMER) return;
-    TEST_TIMER = setInterval(testTick, testSpeedMs);
-    log('Test mode started - synthetic bars running at 4 bars/second');
+    TEST_TIMER = setInterval(testTick, getCurrentSpeed());
+    log(`Test mode started - running at ${getSpeedText()}`);
   };
 
   document.getElementById('testStep').onclick = ()=>{
-    if (!testBars.length) testInitFromCurrent();
+    if (!testBars.length) {
+      log('⚠️ Please initialize test mode first');
+      return;
+    }
     testTick();
   };
 
@@ -3923,12 +3958,43 @@
     log('Test mode stopped');
   };
 
+  // Initialize button - sets up test mode with synthetic data
+  document.getElementById('testInit').onclick = ()=>{
+    if (TEST_TIMER) { clearInterval(TEST_TIMER); TEST_TIMER = null; }
+    testInitFromCurrent();
+    log('✨ Test mode initialized with synthetic data');
+  };
+
+  // Reset button - restores real market data
   document.getElementById('testReset').onclick = ()=>{
     if (TEST_TIMER) { clearInterval(TEST_TIMER); TEST_TIMER = null; }
     testBars = [];
     // Restore original bars for current TF
     loadSymbol(currentSymbol, currentTimeframe);
-    log('Test mode reset - restored real market data');
+    log('🔄 Test mode reset - restored real market data');
+  };
+
+  // Speed control buttons
+  document.getElementById('testSlower').onclick = ()=>{
+    if (currentSpeedIndex > 0) {
+      currentSpeedIndex--;
+      speedMultiplier = speedLevels[currentSpeedIndex];
+      updateSpeedDisplay();
+      restartTimerWithNewSpeed();
+    } else {
+      log('⚠️ Already at minimum speed (0.25x)');
+    }
+  };
+
+  document.getElementById('testFaster').onclick = ()=>{
+    if (currentSpeedIndex < speedLevels.length - 1) {
+      currentSpeedIndex++;
+      speedMultiplier = speedLevels[currentSpeedIndex];
+      updateSpeedDisplay();
+      restartTimerWithNewSpeed();
+    } else {
+      log('⚠️ Already at maximum speed (8.0x)');
+    }
   };
 
   // removeSymbol no longer needs to be global (using event delegation)
