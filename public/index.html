@@ -747,8 +747,13 @@
     } else if (targetType === 'ema') {
       const ema = targetData;
       const valueText = ema && ema.value ? ema.value.toFixed(2) : 'N/A';
+      // Ensure EMA data contains period information for proper persistence
+      const emaDataWithPeriod = {
+        ...ema,
+        period: 200  // EMA(200) period
+      };
       menuItems = [
-        { icon: '🔔', label: `Add alert on EMA(200) at ${valueText}`, action: () => addAlert('ema', ema) },
+        { icon: '🔔', label: `Add alert on EMA(200) at ${valueText}`, action: () => addAlert('ema', emaDataWithPeriod) },
         { icon: '⚙️', label: 'EMA settings', action: () => openEMASettings() },
         { icon: '👁️', label: 'Show/hide EMA', action: () => toggleEMA() }
       ];
@@ -756,8 +761,15 @@
       const bb = targetData;
       const valueText = bb && bb.value ? bb.value.toFixed(2) : 'N/A';
       const bandName = bb && bb.name ? bb.name : 'BB';
+      // Ensure BB data contains all necessary parameters for proper persistence
+      const bbDataWithParams = {
+        ...bb,
+        band: bb.band || 'upper',
+        period: 20,  // BB(20,2) parameters
+        stddev: 2
+      };
       menuItems = [
-        { icon: '🔔', label: `Add alert on ${bandName} at ${valueText}`, action: () => addAlert('bb_' + (bb.band || 'upper'), bb) },
+        { icon: '🔔', label: `Add alert on ${bandName} at ${valueText}`, action: () => addAlert('bb', bbDataWithParams) },
         { icon: '⚙️', label: 'BB settings', action: () => openBBSettings() },
         { icon: '👁️', label: 'Show/hide BB', action: () => toggleBB() }
       ];
@@ -851,51 +863,84 @@
       type,
       data,
       targetPrice: null,
-      targetInfo: ''
+      targetInfo: '',
+      isDynamic: false
     };
     
-    // Generate target info and price based on type
+    // Generate target info and display text based on type
     let info = '';
     let price = null;
+    let isDynamic = false;
     
     switch(type) {
       case 'trendline':
         info = 'Trendline';
-        // For trendlines, calculate current price at current time
-        if (data && tfBars && tfBars.length > 0) {
-          const currentTime = tfBars[tfBars.length - 1].time;
-          const slope = (data.endPrice - data.startPrice) / (data.endTime - data.startTime);
-          price = data.startPrice + slope * (currentTime - data.startTime);
-        }
+        isDynamic = true;
+        // Show that this is dynamic - no fixed price
         break;
       case 'level':
         price = data.price;
         info = `Level at $${price.toFixed(2)}`;
         break;
       case 'ema':
-        price = data.value;
-        info = `EMA(200) at ${price.toFixed(2)}`;
+        info = 'EMA(200)';
+        isDynamic = true;
+        // Show current value for reference but don't store as fixed price
+        if (data && data.value) {
+          info += ` (currently ${data.value.toFixed(2)})`;
+        }
+        break;
+      case 'bb':
+        // Handle unified BB type with band property
+        const bandType = data && data.band ? data.band : 'upper';
+        const bandName = bandType.charAt(0).toUpperCase() + bandType.slice(1);
+        info = `BB ${bandName} Band`;
+        isDynamic = true;
+        if (data && data.value) {
+          info += ` (currently ${data.value.toFixed(2)})`;
+        }
         break;
       case 'bb_upper':
       case 'bb_middle':
       case 'bb_lower':
-        price = data.value;
-        info = `${data.name} at ${price.toFixed(2)}`;
+        // Legacy support for old BB types - convert to unified format
+        const legacyBand = type.replace('bb_', '');
+        const legacyBandName = legacyBand.charAt(0).toUpperCase() + legacyBand.slice(1);
+        info = `BB ${legacyBandName} Band`;
+        isDynamic = true;
+        if (data && data.value) {
+          info += ` (currently ${data.value.toFixed(2)})`;
+        }
+        // Convert legacy type to unified format for storage
+        alertDialogState.type = 'bb';
+        if (!data.band) {
+          alertDialogState.data = { ...data, band: legacyBand };
+        }
         break;
     }
     
-    if (price === null || isNaN(price)) {
-      log('Error: Could not determine price for alert');
+    // For level alerts, we need a price. For dynamic alerts, we don't.
+    if (!isDynamic && (price === null || isNaN(price))) {
+      log('Error: Could not determine price for level alert');
       return;
     }
     
     // Update dialog content
     targetInfo.textContent = info;
-    priceAbove.textContent = `$${price.toFixed(2)}`;
-    priceBelow.textContent = `$${price.toFixed(2)}`;
     
-    alertDialogState.targetPrice = price;
+    if (isDynamic) {
+      // For dynamic elements, don't show fixed prices
+      priceAbove.textContent = 'current value';
+      priceBelow.textContent = 'current value';
+    } else {
+      // For level alerts, show the fixed price
+      priceAbove.textContent = `$${price.toFixed(2)}`;
+      priceBelow.textContent = `$${price.toFixed(2)}`;
+    }
+    
+    alertDialogState.targetPrice = price; // null for dynamic alerts, actual price for levels
     alertDialogState.targetInfo = info;
+    alertDialogState.isDynamic = isDynamic;
     
     // Smart default selection based on current price vs target price
     const currentPrice = tfBars && tfBars.length > 0 ? tfBars[tfBars.length - 1].close : price;
@@ -946,8 +991,14 @@
   function createAlert() {
     const checkedRadio = document.querySelector('input[name="alertDirection"]:checked');
     
-    if (!checkedRadio || !alertDialogState.targetPrice) {
-      log('Error: Invalid alert configuration');
+    if (!checkedRadio) {
+      log('Error: Please select a direction for the alert');
+      return;
+    }
+    
+    // For level alerts, we need a price. For dynamic alerts, we don't.
+    if (!alertDialogState.isDynamic && !alertDialogState.targetPrice) {
+      log('Error: Invalid price for level alert');
       return;
     }
     
@@ -956,23 +1007,98 @@
       id: 'alert_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
       symbol: currentSymbol,
       timeframe: currentTimeframe,
-      type: alertDialogState.type,
       direction, // 'above' or 'below'
-      price: alertDialogState.targetPrice,
       targetInfo: alertDialogState.targetInfo,
-      lineData: alertDialogState.data,
-      created: Date.now(),
+      timestamp: Date.now(),
       triggered: false
     };
+    
+    // Store different data based on alert type following required schema
+    if (alertDialogState.isDynamic) {
+      // For dynamic alerts, store element reference according to proper schema
+      switch(alertDialogState.type) {
+        case 'trendline':
+          // Trendline schema: { type: 'trendline', id, start: {time, price}, end: {time, price}, direction, symbol, timeframe, timestamp }
+          alertData.type = 'trendline';
+          alertData.id = alertDialogState.data.id;
+          alertData.start = {
+            time: alertDialogState.data.startTime,
+            price: alertDialogState.data.startPrice
+          };
+          alertData.end = {
+            time: alertDialogState.data.endTime,
+            price: alertDialogState.data.endPrice
+          };
+          break;
+        case 'ema':
+          // EMA schema: { type: 'ema', period: 200, direction, symbol, timeframe, timestamp }
+          alertData.type = 'ema';
+          alertData.period = 200; // EMA(200)
+          break;
+        case 'bb_upper':
+        case 'bb_middle':
+        case 'bb_lower':
+          // BB schema: { type: 'bb', band: 'upper|middle|lower', period: 20, stddev: 2, direction, symbol, timeframe, timestamp }
+          alertData.type = 'bb';
+          alertData.band = alertDialogState.type.replace('bb_', ''); // Extract 'upper', 'middle', or 'lower'
+          alertData.period = 20; // BB(20,2)
+          alertData.stddev = 2;
+          break;
+        case 'bb':
+          // Handle unified BB type with band property
+          alertData.type = 'bb';
+          alertData.band = alertDialogState.data.band || 'upper';
+          alertData.period = 20; // BB(20,2)
+          alertData.stddev = 2;
+          break;
+      }
+    } else {
+      // Level schema: { type: 'level', price, direction, symbol, timeframe, timestamp }
+      alertData.type = 'level';
+      alertData.price = alertDialogState.targetPrice;
+      alertData.lineData = alertDialogState.data;
+    }
+    
+    // Add comprehensive console logging for verification
+    console.log('[EOD] 🔔 Creating Alert with Schema Verification:');
+    console.log('[EOD] Alert Type:', alertData.type);
+    console.log('[EOD] Direction:', alertData.direction);
+    console.log('[EOD] Complete Alert Object:', JSON.stringify(alertData, null, 2));
+    
+    // Verify required fields per schema
+    switch(alertData.type) {
+      case 'level':
+        console.log('[EOD] ✅ Level Alert - Price:', alertData.price);
+        break;
+      case 'trendline':
+        console.log('[EOD] ✅ Trendline Alert - ID:', alertData.id);
+        console.log('[EOD] ✅ Trendline Start:', alertData.start);
+        console.log('[EOD] ✅ Trendline End:', alertData.end);
+        break;
+      case 'ema':
+        console.log('[EOD] ✅ EMA Alert - Period:', alertData.period);
+        break;
+      case 'bb':
+        console.log('[EOD] ✅ BB Alert - Band:', alertData.band);
+        console.log('[EOD] ✅ BB Alert - Period:', alertData.period);
+        console.log('[EOD] ✅ BB Alert - Stddev:', alertData.stddev);
+        break;
+    }
     
     // Store in localStorage
     const existingAlerts = JSON.parse(localStorage.getItem('eod-alerts') || '[]');
     existingAlerts.push(alertData);
     localStorage.setItem('eod-alerts', JSON.stringify(existingAlerts));
     
+    console.log('[EOD] 💾 Alert saved to localStorage. Total alerts:', existingAlerts.length);
+    
     // Show confirmation
     const directionText = direction === 'above' ? 'above' : 'below';
-    log(`✅ Alert set: Close ${directionText} $${alertDialogState.targetPrice.toFixed(2)} on ${alertDialogState.targetInfo}`);
+    if (alertDialogState.isDynamic) {
+      log(`✅ Alert set: Close ${directionText} ${alertDialogState.targetInfo}`);
+    } else {
+      log(`✅ Alert set: Close ${directionText} $${alertDialogState.targetPrice.toFixed(2)} on ${alertDialogState.targetInfo}`);
+    }
     
     // Hide dialog
     hideAlertDialog();
