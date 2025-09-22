@@ -1174,6 +1174,118 @@
     });
   }
 
+  // ==== INTELLIGENT TRENDLINE EXTENSION SYSTEM ====
+  
+  /**
+   * Determines which endpoint is top vs bottom based on Y-coordinates (prices)
+   * and calculates intelligent extension direction
+   */
+  function getExtensionDirection(trendline, dragMode) {
+    if (!trendline || (dragMode !== 'start' && dragMode !== 'end')) {
+      return null;
+    }
+    
+    const startPrice = trendline.startPrice;
+    const endPrice = trendline.endPrice;
+    
+    // Determine which endpoint is being dragged and its relative position
+    const isDraggingStart = dragMode === 'start';
+    const isDraggingEnd = dragMode === 'end';
+    
+    // Determine if dragged endpoint is the lower or higher price point
+    const draggedPrice = isDraggingStart ? startPrice : endPrice;
+    const otherPrice = isDraggingStart ? endPrice : startPrice;
+    
+    // Smart extension logic:
+    // - Dragging lower endpoint → extend downward into future
+    // - Dragging upper endpoint → extend upward into future
+    const isDraggingLowerPoint = draggedPrice < otherPrice;
+    const isDraggingUpperPoint = draggedPrice > otherPrice;
+    
+    return {
+      isDraggingStart,
+      isDraggingEnd,
+      isDraggingLowerPoint,
+      isDraggingUpperPoint,
+      draggedPrice,
+      otherPrice,
+      shouldExtendDown: isDraggingLowerPoint,
+      shouldExtendUp: isDraggingUpperPoint
+    };
+  }
+  
+  /**
+   * Calculates extended trendline points based on slope and drag direction
+   * FIXED: Enforces direction based on drag position, not line slope
+   */
+  function calculateExtendedTrendline(trendline, extensionInfo, currentTime, currentPrice) {
+    if (!trendline || !extensionInfo) {
+      return null;
+    }
+    
+    const { startTime, startPrice, endTime, endPrice } = trendline;
+    const { isDraggingStart, shouldExtendDown, shouldExtendUp } = extensionInfo;
+    
+    // Update the dragged endpoint first
+    let updatedStartTime = isDraggingStart ? currentTime : startTime;
+    let updatedStartPrice = isDraggingStart ? currentPrice : startPrice;
+    let updatedEndTime = isDraggingStart ? endTime : currentTime;
+    let updatedEndPrice = isDraggingStart ? endPrice : currentPrice;
+    
+    // Calculate time difference for slope calculation
+    const timeDiff = updatedEndTime - updatedStartTime;
+    if (timeDiff === 0) return null;
+    
+    // ARCHITECT'S FIX 1: Force absolute slope, then apply direction
+    let m = Math.abs((updatedEndPrice - updatedStartPrice) / timeDiff);
+    let sign = extensionInfo.shouldExtendUp ? 1 : -1;
+    let extSlope = sign * m;
+    
+    // Get visible time range to determine extension bounds
+    const visibleRange = chart.timeScale().getVisibleRange();
+    if (!visibleRange) return null;
+    
+    const visibleDuration = visibleRange.to - visibleRange.from;
+    const extensionDuration = Math.min(visibleDuration * 0.3, 86400 * 10); // Max 10 days or 30% of visible range
+    
+    // ARCHITECT'S FIX 2: Always use rightmost endpoint as base for future projection
+    let baseTime = Math.max(updatedStartTime, updatedEndTime);  // Most future time
+    let basePrice = (baseTime === updatedStartTime) ? updatedStartPrice : updatedEndPrice;
+    
+    // Calculate extension into future only
+    let futureTime = baseTime + extensionDuration;
+    let futurePrice = basePrice + extSlope * extensionDuration;
+    
+    // ARCHITECT'S FIX 3: Apply consistent clamping (removed asymmetry)
+    // Remove clamping entirely to avoid autoscale explosions and ensure symmetry
+    
+    // Set up the final extended trendline points
+    let extendedStartTime, extendedStartPrice, extendedEndTime, extendedEndPrice;
+    
+    if (baseTime === updatedStartTime) {
+      // Start is rightmost, so start stays as base, extend end point
+      extendedStartTime = updatedStartTime;
+      extendedStartPrice = updatedStartPrice;
+      extendedEndTime = futureTime;
+      extendedEndPrice = futurePrice;
+    } else {
+      // End is rightmost, so end stays as base, but we still project forward
+      extendedStartTime = updatedStartTime;
+      extendedStartPrice = updatedStartPrice;
+      extendedEndTime = futureTime;
+      extendedEndPrice = futurePrice;
+    }
+    
+    return {
+      startTime: extendedStartTime,
+      startPrice: extendedStartPrice,
+      endTime: extendedEndTime,
+      endPrice: extendedEndPrice,
+      isExtended: true,
+      extensionDirection: shouldExtendDown ? 'down' : shouldExtendUp ? 'up' : 'none'
+    };
+  }
+
   // ==== BUTTERY SMOOTH POINTER EVENT SYSTEM ====
   let pointerDownState = {
     startX: 0,
@@ -1338,31 +1450,82 @@
       }
     }
 
-    // 2) drag trendline
+    // 2) drag trendline with intelligent extension
     if (trendDragState.isDragging && trendDragState.id && time != null && Number.isFinite(price)) {
       const arr = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
       const idx = arr.findIndex(t => t.id === trendDragState.id);
       if (idx >= 0) {
         const t = arr[idx];
+        let trendlineData = null;
+        
         if (trendDragState.mode === 'move') {
+          // Standard move operation - move entire trendline
           const dt = time - trendDragState.base.time;
           const dp = price - trendDragState.base.price;
           t.startTime = trendDragState.start.time + dt;
           t.startPrice = trendDragState.start.price + dp;
           t.endTime = trendDragState.end.time + dt;
           t.endPrice = trendDragState.end.price + dp;
-        } else if (trendDragState.mode === 'start') {
-          t.startTime = time; t.startPrice = price;
-        } else if (trendDragState.mode === 'end') {
-          t.endTime = time; t.endPrice = price;
-        }
-        const rec = trendSeriesById.get(trendDragState.id);
-        if (rec) {
-          rec.data = t; // keep cache in sync
-          rec.series.setData([
+          
+          // Use standard points for move operations
+          trendlineData = [
             { time: t.startTime, value: t.startPrice },
-            { time: t.endTime, value: t.endPrice },
-          ]);
+            { time: t.endTime, value: t.endPrice }
+          ];
+          
+        } else if (trendDragState.mode === 'start' || trendDragState.mode === 'end') {
+          // Smart extension for endpoint dragging
+          
+          // First update the dragged endpoint
+          if (trendDragState.mode === 'start') {
+            t.startTime = time; 
+            t.startPrice = price;
+          } else {
+            t.endTime = time; 
+            t.endPrice = price;
+          }
+          
+          // Calculate intelligent extension based on drag direction
+          const extensionInfo = getExtensionDirection(t, trendDragState.mode);
+          if (extensionInfo) {
+            const extendedTrendline = calculateExtendedTrendline(t, extensionInfo, time, price);
+            
+            if (extendedTrendline) {
+              // Use extended trendline data for visual feedback
+              trendlineData = [
+                { time: extendedTrendline.startTime, value: extendedTrendline.startPrice },
+                { time: extendedTrendline.endTime, value: extendedTrendline.endPrice }
+              ];
+              
+              // Log extension feedback for user awareness
+              const direction = extendedTrendline.extensionDirection;
+              if (direction !== 'none') {
+                // Only log occasionally to avoid spam (every 10th frame approximately)
+                if (Math.random() < 0.1) {
+                  log(`📏 Extending trendline ${direction}ward`);
+                }
+              }
+            } else {
+              // Fallback to standard points if extension calculation fails
+              trendlineData = [
+                { time: t.startTime, value: t.startPrice },
+                { time: t.endTime, value: t.endPrice }
+              ];
+            }
+          } else {
+            // Fallback to standard points if no extension info
+            trendlineData = [
+              { time: t.startTime, value: t.startPrice },
+              { time: t.endTime, value: t.endPrice }
+            ];
+          }
+        }
+        
+        // Update the visual trendline with calculated data (standard or extended)
+        const rec = trendSeriesById.get(trendDragState.id);
+        if (rec && trendlineData) {
+          rec.data = t; // keep cache in sync with base trendline data
+          rec.series.setData(trendlineData); // update visual with potentially extended data
         }
       }
     }
