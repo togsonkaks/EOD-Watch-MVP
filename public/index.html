@@ -1825,6 +1825,26 @@
     try {
       if (chart && chart.timeScale()) {
         time = chart.timeScale().coordinateToTime(px);
+        
+        // FIX: If coordinateToTime returns null, use visible range to get nearest valid time
+        if (time === null || time === undefined) {
+          const visibleRange = chart.timeScale().getVisibleLogicalRange();
+          if (visibleRange && chartData && chartData.length > 0) {
+            // Clamp to visible data range
+            const visibleStart = Math.max(0, Math.floor(visibleRange.from));
+            const visibleEnd = Math.min(chartData.length - 1, Math.ceil(visibleRange.to));
+            
+            // Use the time at the nearest visible index
+            const rect = chartContainer.getBoundingClientRect();
+            const clickRatio = px / rect.width;
+            const logicalIndex = Math.floor(visibleStart + clickRatio * (visibleEnd - visibleStart));
+            const clampedIndex = Math.max(visibleStart, Math.min(visibleEnd, logicalIndex));
+            
+            if (chartData[clampedIndex]) {
+              time = chartData[clampedIndex].time;
+            }
+          }
+        }
       } else {
         console.error('[EOD] ❌ Chart or timeScale not available');
       }
