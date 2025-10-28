@@ -1812,12 +1812,9 @@
     };
   }
 
-  // ==== OLD POINTER EVENT SYSTEM - DISABLED ====
-  // This has been replaced by simple canvas overlay mouse handlers
-  // See setupCanvasOverlayMouseHandlers() for the new implementation
+  // ==== POINTER EVENT SYSTEM ====
   
-  /*
-  function onPointerDown_OLD(e) {
+  function onPointerDown(e) {
     const chartContainer = document.getElementById('chart');
     
     // Get coordinates with safety checks
@@ -2374,8 +2371,6 @@
     lastPointer = null;
     chartContainer.style.cursor = '';
   }
-  */
-  // END OF OLD POINTER EVENT SYSTEM - All replaced by canvas overlay mouse handlers
 
   // ==== RIGHT-CLICK CONTEXT MENU HANDLER ====
   function onContextMenu(e) {
@@ -5163,13 +5158,12 @@
       }
     }); */
 
-    // ==== OLD POINTER EVENT LISTENERS - DISABLED ====
-    // These have been replaced by canvas overlay mouse handlers
+    // ==== POINTER EVENT LISTENERS - RE-ENABLED ====
     let chartContainer = document.getElementById('chart');
-    // chartContainer.addEventListener('pointerdown', onPointerDown);
-    // chartContainer.addEventListener('pointermove', onPointerMove, { passive: false });
-    // chartContainer.addEventListener('pointerup', onPointerUp);
-    // chartContainer.addEventListener('pointercancel', onPointerUp);
+    chartContainer.addEventListener('pointerdown', onPointerDown);
+    chartContainer.addEventListener('pointermove', onPointerMove, { passive: false });
+    chartContainer.addEventListener('pointerup', onPointerUp);
+    chartContainer.addEventListener('pointercancel', onPointerUp);
     chartContainer.addEventListener('contextmenu', onContextMenu);
 
     // Keep mousemove only for trendline preview (non-performance critical)
