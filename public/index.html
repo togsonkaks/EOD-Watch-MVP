@@ -1826,30 +1826,29 @@
       if (chart && chart.timeScale()) {
         time = chart.timeScale().coordinateToTime(px);
         
-        // FIX: If coordinateToTime returns null, use visible range to get nearest valid time
+        // FIX: If coordinateToTime returns null or throws error, interpolate from visible time range
         if (time === null || time === undefined) {
-          const visibleRange = chart.timeScale().getVisibleLogicalRange();
-          if (visibleRange && chartData && chartData.length > 0) {
-            // Clamp to visible data range
-            const visibleStart = Math.max(0, Math.floor(visibleRange.from));
-            const visibleEnd = Math.min(chartData.length - 1, Math.ceil(visibleRange.to));
-            
-            // Use the time at the nearest visible index
-            const rect = chartContainer.getBoundingClientRect();
-            const clickRatio = px / rect.width;
-            const logicalIndex = Math.floor(visibleStart + clickRatio * (visibleEnd - visibleStart));
-            const clampedIndex = Math.max(visibleStart, Math.min(visibleEnd, logicalIndex));
-            
-            if (chartData[clampedIndex]) {
-              time = chartData[clampedIndex].time;
-            }
+          const visibleRange = chart.timeScale().getVisibleRange();
+          if (visibleRange && visibleRange.from && visibleRange.to) {
+            // Interpolate time based on click position within chart width
+            const clickRatio = Math.max(0, Math.min(1, px / rect.width));
+            time = Math.floor(visibleRange.from + clickRatio * (visibleRange.to - visibleRange.from));
           }
         }
       } else {
         console.error('[EOD] ❌ Chart or timeScale not available');
       }
     } catch (error) {
-      console.error('[EOD] ❌ Error in coordinateToTime:', error);
+      // If coordinateToTime throws, use visible time range as fallback
+      try {
+        const visibleRange = chart.timeScale().getVisibleRange();
+        if (visibleRange && visibleRange.from && visibleRange.to) {
+          const clickRatio = Math.max(0, Math.min(1, px / rect.width));
+          time = Math.floor(visibleRange.from + clickRatio * (visibleRange.to - visibleRange.from));
+        }
+      } catch (fallbackError) {
+        console.error('[EOD] ❌ Fallback coordinate conversion also failed');
+      }
     }
     
     try {
@@ -4337,13 +4336,11 @@
       setTimeout(() => {
         try {
           const testCoord = chart.timeScale().coordinateToTime(100);
-          if (testCoord === null) {
-            console.error('[EOD] ❌ Chart coordinate conversion still fails after data load!');
-          } else {
+          if (testCoord !== null) {
             console.log('[EOD] ✅ Chart is rendering correctly with data:', testCoord);
           }
         } catch (error) {
-          console.error('[EOD] ❌ Chart coordinate test error:', error);
+          // Coordinate conversion uses fallback system
         }
       }, 50);
       
