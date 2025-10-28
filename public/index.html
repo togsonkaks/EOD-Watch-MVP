@@ -2829,8 +2829,8 @@
     let isDragging = false;
     let hitResult = null;
     
-    // Enable pointer events on canvas for mouse interaction
-    canvas.style.pointerEvents = 'auto';
+    // Start with pointer events disabled - let chart handle interactions by default
+    canvas.style.pointerEvents = 'none';
     
     canvas.addEventListener('mousedown', (e) => {
       const rect = canvas.getBoundingClientRect();
@@ -2882,6 +2882,7 @@
           unifiedDragState.drawingMode = false;
           $('#trendline-tool').classList.remove('active');
           document.body.classList.remove('drawing-mode');
+          canvas.style.pointerEvents = 'none'; // Restore chart interaction
           
           console.log('[OVERLAY] ✅ Trendline created from', startPrice.toFixed(2), 'to', price.toFixed(2));
           e.preventDefault();
@@ -5958,11 +5959,13 @@
 
   // ===== OVERLAY DRAWING TOOL BUTTONS =====
   $('#level-tool').addEventListener('click', () => {
+    const canvas = document.getElementById('drawing-overlay');
     if (unifiedDragState.drawingTool === 'level' && unifiedDragState.drawingMode) {
       // Turn off drawing mode
       unifiedDragState.drawingMode = false;
       $('#level-tool').classList.remove('active');
       document.body.classList.remove('drawing-mode');
+      if (canvas) canvas.style.pointerEvents = 'none'; // Restore chart interaction
       log('Drawing mode off');
     } else {
       // Switch to level tool
@@ -5972,22 +5975,26 @@
       $('#level-tool').classList.add('active');
       $('#trendline-tool').classList.remove('active');
       document.body.classList.add('drawing-mode');
+      if (canvas) canvas.style.pointerEvents = 'none'; // Level uses chart click, not overlay
       log('Click chart to add level');
     }
   });
 
   $('#trendline-tool').addEventListener('click', () => {
+    const canvas = document.getElementById('drawing-overlay');
     if (unifiedDragState.drawingTool === 'trendline' && unifiedDragState.drawingMode) {
       // Turn off drawing mode
       unifiedDragState.drawingMode = false;
       unifiedDragState.trendlineStart = null;
       $('#trendline-tool').classList.remove('active');
       document.body.classList.remove('drawing-mode');
+      if (canvas) canvas.style.pointerEvents = 'none'; // Restore chart interaction
       log('Drawing mode off');
     } else {
       // Switch to trendline tool
       unifiedDragState.drawingTool = 'trendline';
       unifiedDragState.drawingMode = true;
+      if (canvas) canvas.style.pointerEvents = 'auto'; // Enable overlay for trendline clicks
       unifiedDragState.trendlineStart = null;
       $('#trendline-tool').classList.add('active');
       $('#level-tool').classList.remove('active');
