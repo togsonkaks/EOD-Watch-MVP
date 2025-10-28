@@ -1634,10 +1634,47 @@
 
   // ==== PERFORMANCE FREEZING DURING DRAG ====
   function freezeDuringDrag(on) {
-    chart.applyOptions({
-      crosshair: { mode: on ? LightweightCharts.CrosshairMode.Hidden : LightweightCharts.CrosshairMode.Magnet },
-      rightPriceScale: { autoScale: false }  // Never re-enable auto-scaling to prevent snap-back
-    });
+    if (on) {
+      // FREEZE: Disable all chart interactions during drag
+      chart.applyOptions({
+        crosshair: { mode: LightweightCharts.CrosshairMode.Hidden },
+        rightPriceScale: { autoScale: false },
+        handleScroll: {
+          mouseWheel: false,
+          pressedMouseMove: false,
+          horzTouchDrag: false,
+          vertTouchDrag: false
+        },
+        handleScale: {
+          mouseWheel: false,
+          pinch: false,
+          axisPressedMouseMove: {
+            time: false,
+            price: false
+          }
+        }
+      });
+    } else {
+      // UNFREEZE: Re-enable chart interactions after drag
+      chart.applyOptions({
+        crosshair: { mode: LightweightCharts.CrosshairMode.Magnet },
+        rightPriceScale: { autoScale: false },
+        handleScroll: {
+          mouseWheel: true,
+          pressedMouseMove: true,
+          horzTouchDrag: true,
+          vertTouchDrag: true
+        },
+        handleScale: {
+          mouseWheel: true,
+          pinch: true,
+          axisPressedMouseMove: {
+            time: true,
+            price: true
+          }
+        }
+      });
+    }
   }
 
   // ==== INTELLIGENT TRENDLINE EXTENSION SYSTEM ====
@@ -1982,6 +2019,9 @@
         unifiedDragState.isDragging = true;
         unifiedDragState.hasMoved = true;
         
+        // CRITICAL: Freeze chart to prevent panning during drag
+        freezeDuringDrag(true);
+        
         logDragOperation('activated', { 
           totalMovement, 
           deltaX, 
@@ -1989,9 +2029,6 @@
           threshold: 5,
           pendingType: unifiedDragState.pendingDrag.type
         });
-        
-        // NOW start performance freezing for drag
-        freezeDuringDrag(true);
       }
     }
     
