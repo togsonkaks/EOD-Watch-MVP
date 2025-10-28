@@ -2837,11 +2837,20 @@
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
       
+      console.log('[OVERLAY] Click at canvas coords:', px, py);
+      console.log('[OVERLAY] Canvas rect:', rect);
+      
       const time = canvasOverlay.xToTime(px);
       const price = canvasOverlay.yToPrice(py);
       
+      console.log('[OVERLAY] Converted to time:', time, 'price:', price);
+      
       // Check if we're in drawing mode for trendline creation
-      if (unifiedDragState.drawingMode && unifiedDragState.drawingTool === 'trendline' && time && price) {
+      if (unifiedDragState.drawingMode && unifiedDragState.drawingTool === 'trendline') {
+        if (!time || !price) {
+          console.error('[OVERLAY] ❌ Cannot create trendline - invalid coordinates:', { time, price, px, py });
+          return;
+        }
         if (!unifiedDragState.trendlineStart) {
           // First click: set start point
           unifiedDragState.trendlineStart = { time, price };
