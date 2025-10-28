@@ -1,0 +1,271 @@
+// ==== REPLACE THE ENTIRE POINTER EVENT SYSTEM ====
+
+// Remove all existing pointer event listeners first
+function setupChartInteraction() {
+    const chartContainer = document.getElementById('chart');
+    
+    // Remove any existing listeners
+    chartContainer.replaceWith(chartContainer.cloneNode(true));
+    const newContainer = document.getElementById('chart');
+    
+    // Simple, reliable mouse event system
+    let isDragging = false;
+    let dragType = null; // 'level' | 'trendline' | 'trendline_start' | 'trendline_end'
+    let dragTarget = null;
+    let dragStartX = 0, dragStartY = 0;
+
+    newContainer.addEventListener('mousedown', (e) => {
+        const rect = newContainer.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        // Check what we're clicking on
+        const trendHit = hitTestTrendlines(x, y);
+        const levelHit = hitTestLevel(x, y);
+        
+        if (trendHit) {
+            // Check if clicking near endpoints
+            const trendData = trendSeriesById.get(trendHit.id)?.data;
+            if (trendData) {
+                const startX = chart.timeScale().timeToCoordinate(trendData.startTime);
+                const startY = candleSeries.priceToCoordinate(trendData.startPrice);
+                const endX = chart.timeScale().timeToCoordinate(trendData.endTime);
+                const endY = candleSeries.priceToCoordinate(trendData.endPrice);
+                
+                const startDist = Math.sqrt(Math.pow(x - startX, 2) + Math.pow(y - startY, 2));
+                const endDist = Math.sqrt(Math.pow(x - endX, 2) + Math.pow(y - endY, 2));
+                
+                if (startDist <= 8) {
+                    isDragging = true;
+                    dragType = 'trendline_start';
+                    dragTarget = trendHit.id;
+                } else if (endDist <= 8) {
+                    isDragging = true;
+                    dragType = 'trendline_end';
+                    dragTarget = trendHit.id;
+                } else {
+                    isDragging = true;
+                    dragType = 'trendline';
+                    dragTarget = trendHit.id;
+                }
+                
+                dragStartX = x;
+                dragStartY = y;
+                newContainer.style.cursor = 'grabbing';
+                e.preventDefault();
+            }
+        } else if (levelHit) {
+            isDragging = true;
+            dragType = 'level';
+            dragTarget = levelHit.id;
+            dragStartX = x;
+            dragStartY = y;
+            newContainer.style.cursor = 'ns-resize';
+            e.preventDefault();
+        }
+    });
+
+    newContainer.addEventListener('mousemove', (e) => {
+        const rect = newContainer.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        if (!isDragging) {
+            // Update cursor based on hover
+            const trendHit = hitTestTrendlines(x, y);
+            const levelHit = hitTestLevel(x, y);
+            
+            if (trendHit) {
+                const trendData = trendSeriesById.get(trendHit.id)?.data;
+                if (trendData) {
+                    const startX = chart.timeScale().timeToCoordinate(trendData.startTime);
+                    const startY = candleSeries.priceToCoordinate(trendData.startPrice);
+                    const endX = chart.timeScale().timeToCoordinate(trendData.endTime);
+                    const endY = candleSeries.priceToCoordinate(trendData.endPrice);
+                    
+                    const startDist = Math.sqrt(Math.pow(x - startX, 2) + Math.pow(y - startY, 2));
+                    const endDist = Math.sqrt(Math.pow(x - endX, 2) + Math.pow(y - endY, 2));
+                    
+                    if (startDist <= 8 || endDist <= 8) {
+                        newContainer.style.cursor = 'crosshair';
+                    } else {
+                        newContainer.style.cursor = 'grab';
+                    }
+                }
+            } else if (levelHit) {
+                newContainer.style.cursor = 'ns-resize';
+            } else {
+                newContainer.style.cursor = '';
+            }
+            return;
+        }
+        
+        // Handle dragging
+        const time = chart.timeScale().coordinateToTime(x);
+        const price = candleSeries.coordinateToPrice(y);
+        
+        if (time == null || price == null) return;
+        
+        if (dragType === 'level' && dragTarget) {
+            // Update level position
+            const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+            const levelIndex = levels.findIndex(l => l.id === dragTarget);
+            if (levelIndex >= 0 && levels[levelIndex].price !== price) {
+                levels[levelIndex].price = price;
+                
+                // Update the visual line immediately
+                const rec = levelLineById.get(dragTarget);
+                if (rec) {
+                    try { candleSeries.removePriceLine(rec.line); } catch {}
+                    const newLine = candleSeries.createPriceLine({
+                        price: price,
+                        color: levels[levelIndex].selected ? '#22d3ee' : (levels[levelIndex].color || '#60a5fa'),
+                        lineWidth: levels[levelIndex].selected ? 5 : 2,
+                        lineStyle: 0,
+                        axisLabelVisible: true,
+                        title: `Level ${price.toFixed(2)}`
+                    });
+                    levelLineById.set(dragTarget, { line: newLine, data: levels[levelIndex] });
+                }
+            }
+        } 
+        else if (dragType.startsWith('trendline') && dragTarget) {
+            // Update trendline position
+            const trends = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+            const trendIndex = trends.findIndex(t => t.id === dragTarget);
+            if (trendIndex >= 0) {
+                const trend = trends[trendIndex];
+                
+                if (dragType === 'trendline_start') {
+                    trend.startTime = time;
+                    trend.startPrice = price;
+                } else if (dragType === 'trendline_end') {
+                    trend.endTime = time;
+                    trend.endPrice = price;
+                } else if (dragType === 'trendline') {
+                    // Move entire trendline
+                    const deltaTime = time - chart.timeScale().coordinateToTime(dragStartX);
+                    const deltaPrice = price - candleSeries.coordinateToPrice(dragStartY);
+                    
+                    trend.startTime += deltaTime;
+                    trend.startPrice += deltaPrice;
+                    trend.endTime += deltaTime;
+                    trend.endPrice += deltaPrice;
+                    
+                    dragStartX = x;
+                    dragStartY = y;
+                }
+                
+                // Update the visual line immediately
+                const rec = trendSeriesById.get(dragTarget);
+                if (rec) {
+                    rec.data = trend;
+                    rec.series.setData([
+                        { time: trend.startTime, value: trend.startPrice },
+                        { time: trend.endTime, value: trend.endPrice }
+                    ]);
+                }
+            }
+        }
+    });
+
+    newContainer.addEventListener('mouseup', (e) => {
+        if (isDragging) {
+            // Save final positions
+            if (dragType === 'level') {
+                saveLevelsForSymbol(currentSymbol, currentTimeframe, getLevelsForSymbol(currentSymbol, currentTimeframe));
+                log(`Level moved to new position`);
+            } else if (dragType.startsWith('trendline')) {
+                saveTrendlinesForSymbol(currentSymbol, currentTimeframe, getTrendlinesForSymbol(currentSymbol, currentTimeframe));
+                log(`Trendline updated`);
+            }
+            
+            isDragging = false;
+            dragType = null;
+            dragTarget = null;
+            newContainer.style.cursor = '';
+        }
+    });
+
+    newContainer.addEventListener('mouseleave', (e) => {
+        if (isDragging) {
+            // Cancel drag if mouse leaves chart
+            isDragging = false;
+            dragType = null;
+            dragTarget = null;
+            newContainer.style.cursor = '';
+        }
+    });
+
+    // Keep the existing click handler for drawing
+    chart.subscribeClick(param => {
+        if (param.point && !isDragging) {
+            // Your existing drawing code here...
+        }
+    });
+}
+
+// ==== SIMPLIFIED HIT TESTING ====
+function hitTestTrendlines(x, y, tolerance = 10) {
+    for (const [id, rec] of trendSeriesById.entries()) {
+        const t = rec.data;
+        const x1 = chart.timeScale().timeToCoordinate(t.startTime);
+        const y1 = candleSeries.priceToCoordinate(t.startPrice);
+        const x2 = chart.timeScale().timeToCoordinate(t.endTime);
+        const y2 = candleSeries.priceToCoordinate(t.endPrice);
+        
+        if ([x1, y1, x2, y2].some(v => v == null)) continue;
+        
+        const distance = pointToLineDistance(x, y, x1, y1, x2, y2);
+        if (distance <= tolerance) {
+            return { id };
+        }
+    }
+    return null;
+}
+
+function hitTestLevel(x, y, tolerance = 8) {
+    for (const [id, rec] of levelLineById.entries()) {
+        const levelY = candleSeries.priceToCoordinate(rec.data.price);
+        if (levelY == null) continue;
+        
+        if (Math.abs(y - levelY) <= tolerance) {
+            return { id };
+        }
+    }
+    return null;
+}
+
+function pointToLineDistance(px, py, x1, y1, x2, y2) {
+    const A = px - x1;
+    const B = py - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = 0;
+    
+    if (lenSq !== 0) {
+        param = Math.max(0, Math.min(1, dot / lenSq));
+    }
+
+    const xx = x1 + param * C;
+    const yy = y1 + param * D;
+
+    const dx = px - xx;
+    const dy = py - yy;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+// ==== REMOVE THE COMPLEX POINTER SYSTEM ====
+// Delete these from your code:
+// - onPointerDown, onPointerMove, onPointerUp functions  
+// - pointerDownState, trendDragState, levelDragState variables
+// - rafToken, lastPointer variables
+// - processPointer function
+// - freezeDuringDrag function
+
+// ==== CALL THE NEW SETUP ====
+// Replace your existing setupChartInteraction() call with:
+setupChartInteraction();

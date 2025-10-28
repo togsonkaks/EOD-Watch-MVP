@@ -1,0 +1,175 @@
+Main Issues Found:
+1. Undefined Variables
+javascript
+
+// Fix: Replace undefined variables
+const candle = candleSeries; // 'candle' is undefined but used in test mode
+
+2. Missing API Endpoints
+javascript
+
+// Fix: Add proper API endpoints or mock data
+const API = '/api'; // Update this to your actual API endpoint
+
+3. Event Listener Issues
+javascript
+
+// Fix: Add missing event listeners
+$('#btnLoad').addEventListener('click', () => {
+  const symbol = $('#ticker').value.trim().toUpperCase();
+  if (symbol) loadSymbol(symbol);
+});
+
+$('#ticker').addEventListener('keypress', e => {
+  if (e.key === 'Enter') {
+    const symbol = $('#ticker').value.trim().toUpperCase();
+    if (symbol) loadSymbol(symbol);
+  }
+});
+
+4. Mini Chart Data Loading
+javascript
+
+// Fix: Update mini chart data loading with proper error handling
+async function loadMiniChartData(symbol) {
+  try {
+    const miniChartData = miniCharts[symbol];
+    if (!miniChartData) return;
+    
+    // Use the same fetchBars function for consistency
+    const bars = await fetchBars(symbol, 60); // Last 60 days for mini charts
+    
+    if (bars && bars.length > 0) {
+      const chartData = bars.map(bar => ({
+        time: bar.time,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close
+      }));
+      
+      miniChartData.candleSeries.setData(chartData);
+      
+      // Update price info
+      const latestBar = bars[bars.length - 1];
+      if (latestBar && miniChartData.priceEl) {
+        miniChartData.priceEl.textContent = `$${latestBar.close.toFixed(2)}`;
+        
+        if (bars.length > 1) {
+          const prevBar = bars[bars.length - 2];
+          const change = latestBar.close - prevBar.close;
+          const changePercent = ((change / prevBar.close) * 100).toFixed(2);
+          const changeText = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent}%)`;
+          
+          if (miniChartData.changeEl) {
+            miniChartData.changeEl.textContent = changeText;
+            miniChartData.changeEl.className = `mini-chart-change ${change >= 0 ? 'positive' : 'negative'}`;
+          }
+        }
+      }
+      
+      miniChartData.loadingDiv.style.display = 'none';
+    }
+  } catch (error) {
+    console.error(`Error loading mini chart data for ${symbol}:`, error);
+    if (miniChartData && miniChartData.loadingDiv) {
+      miniChartData.loadingDiv.textContent = 'Error';
+    }
+  }
+}
+
+5. Improved Error Handling for Chart Operations
+javascript
+
+// Fix: Add comprehensive error handling
+function safeChartOperation(operation) {
+  try {
+    return operation();
+  } catch (error) {
+    console.warn('[EOD] Chart operation failed:', error);
+    return null;
+  }
+}
+
+// Use it like this:
+function drawLevelsOnChart() {
+  safeChartOperation(() => {
+    // Your existing drawing code here
+    const symbolLevels = (getLevelsForSymbol(currentSymbol, currentTimeframe) || [])
+      .filter(L => L && L.id != null && Number.isFinite(L.price) && L.price > 0);
+    
+    // ... rest of your drawing code
+  });
+}
+
+6. Fix Test Mode Initialization
+javascript
+
+// Fix: Update test mode to use correct series reference
+function testInitFromCurrent() {
+  if (!tfBars?.length) return;
+  const last = tfBars.at(-1);
+  baseFrom = cloneBar(last);
+  
+  testBars = [baseFrom];
+  for (let i = 0; i < 220; i++) testBars.push(genNextMinute(testBars.at(-1), 18));
+  
+  // Use candleSeries instead of undefined 'candle'
+  candleSeries.setData(testBars);
+  
+  const emaArr = emaFromBars(testBars, 200);
+  emaSeries.setData(emaArr);
+  
+  const bb = bbFromBars(testBars, 20, 2);
+  bbUpperSeries.setData(bb.upper);
+  bbMiddleSeries.setData(bb.middle);
+  bbLowerSeries.setData(bb.lower);
+  
+  chart.timeScale().fitContent();
+  log('Test mode initialized with synthetic 1-minute bars');
+}
+
+7. Add Missing Helper Functions
+javascript
+
+// Fix: Add missing utility functions
+function removeSymbol(symbol) {
+  watchlist = watchlist.filter(s => s !== symbol);
+  saveWatchlist();
+  updateWatchlistDisplay();
+  
+  // Load another symbol if current one is removed
+  if (currentSymbol === symbol && watchlist.length > 0) {
+    loadSymbol(watchlist[0]);
+  } else if (watchlist.length === 0) {
+    // Handle empty watchlist case
+    log('Watchlist is empty');
+  }
+}
+
+8. Performance Optimization
+javascript
+
+// Fix: Add cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  // Clean up intervals and charts
+  if (TEST_TIMER) {
+    clearInterval(TEST_TIMER);
+  }
+  disposeMiniCharts();
+});
+
+// Enhanced mini chart disposal
+function disposeMiniCharts() {
+  Object.keys(miniCharts).forEach(symbol => {
+    const mini = miniCharts[symbol];
+    if (mini && mini.chart) {
+      try {
+        mini.chart.remove();
+      } catch (e) {
+        console.warn('Error removing mini chart:', e);
+      }
+    }
+  });
+  miniCharts = {};
+}
