@@ -2002,11 +2002,28 @@
     const rect = document.getElementById('chart').getBoundingClientRect();
     const px = lastPointer.clientX - rect.left;
     const py = lastPointer.clientY - rect.top;
-    const time = safeLogicalToTime(safeChartToLogical(px));
-    const price = safeChartToPrice(py);
+    
+    // Use DIRECT coordinate conversion APIs - no broken logical chain
+    let time = null;
+    let price = null;
+    try {
+      if (chart && chart.timeScale()) {
+        time = chart.timeScale().coordinateToTime(px);
+      }
+    } catch (error) {
+      console.warn('[EOD] ⚠️ coordinateToTime error:', error);
+    }
+    
+    try {
+      if (candleSeries) {
+        price = candleSeries.coordinateToPrice(py);
+      }
+    } catch (error) {
+      console.warn('[EOD] ⚠️ coordinateToPrice error:', error);
+    }
     
     // Validate coordinates
-    if (time === null || price === null) {
+    if (time === null || price === null || !isFinite(time) || !isFinite(price)) {
       console.warn('[EOD] ⚠️ Invalid coordinates during drag, skipping frame');
       return;
     }
@@ -3623,9 +3640,10 @@
     
     // Render trendlines
     drawings.trendlines.forEach(trendline => {
-      const x1 = safeLogicalToChart(safeChartToLogical(chart.timeScale().timeToCoordinate(trendline.startTime)));
+      // Use DIRECT coordinate conversion - no logical intermediates
+      const x1 = chart.timeScale().timeToCoordinate(trendline.startTime);
       const y1 = safePriceToChart(trendline.startPrice);
-      const x2 = safeLogicalToChart(safeChartToLogical(chart.timeScale().timeToCoordinate(trendline.endTime)));
+      const x2 = chart.timeScale().timeToCoordinate(trendline.endTime);
       const y2 = safePriceToChart(trendline.endPrice);
       
       if (x1 !== null && y1 !== null && x2 !== null && y2 !== null &&
