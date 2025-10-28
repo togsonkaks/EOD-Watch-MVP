@@ -1997,8 +1997,8 @@
   function onPointerMove(e) {
     lastPointer = e; // stash the latest event
     
-    // CRITICAL: If dragging, prevent ALL default chart behavior
-    if (unifiedDragState.isDragging) {
+    // CRITICAL: If dragging OR pending drag, prevent ALL default chart behavior
+    if (unifiedDragState.isDragging || unifiedDragState.pendingDrag) {
       e.preventDefault();
       e.stopPropagation();
     }
@@ -2031,6 +2031,14 @@
     unifiedDragState.currentY = py;
     unifiedDragState.currentTime = time;
     unifiedDragState.currentPrice = price;
+    
+    // Update trendline preview if drawing mode with first point set
+    if (unifiedDragState.drawingMode && 
+        unifiedDragState.drawingTool === 'trendline' && 
+        unifiedDragState.trendlineStart && 
+        time && price) {
+      updateTrendlinePreview(time, price);
+    }
     
     // Track movement for click vs drag detection
     if (!unifiedDragState.isDragging && unifiedDragState.pendingDrag) {
@@ -2232,6 +2240,9 @@
         // Update stored data reference
         rec.data = trendline;
       }
+      
+      // CRITICAL FIX: Save to storage during drag so changes persist
+      saveTrendlinesForSymbol(currentSymbol, currentTimeframe, trendlines);
     }
   }
 
@@ -5678,19 +5689,22 @@
 
   // ---- Preview functions for trendline drawing
   function enableTrendlinePreview() {
-    if (!trendlineStart) return;
+    if (!unifiedDragState.trendlineStart) return;
     
     previewTrendline = chart.addLineSeries({
       color: '#94a3b8', // Gray preview color
       lineWidth: 1,
-      lineStyle: 2 // Dashed line style for preview
+      lineStyle: 2, // Dashed line style for preview
+      priceLineVisible: false,
+      lastValueVisible: false
     });
+    console.log('[EOD] ✅ Trendline preview enabled');
   }
 
   function updateTrendlinePreview(endTime, endPrice) {
-    if (previewTrendline && trendlineStart) {
+    if (previewTrendline && unifiedDragState.trendlineStart) {
       previewTrendline.setData([
-        { time: trendlineStart.time, value: trendlineStart.price },
+        { time: unifiedDragState.trendlineStart.time, value: unifiedDragState.trendlineStart.price },
         { time: endTime, value: endPrice }
       ]);
     }
