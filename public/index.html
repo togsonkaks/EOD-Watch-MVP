@@ -1755,12 +1755,6 @@
   // Legacy pointerDownState removed - using unifiedDragState now
 
   function onPointerDown(e) {
-    // DISABLE DRAG SYSTEM DURING DRAWING MODE TO PREVENT CONFLICTS
-    if (unifiedDragState.drawingMode) {
-      console.log('[EOD] 🚫 Drag system disabled during drawing mode - tool:', unifiedDragState.drawingTool, 'mode:', unifiedDragState.drawingMode);
-      return; // Let the drawing system handle this
-    }
-    
     const chartContainer = document.getElementById('chart');
     
     // Get coordinates with safety checks
@@ -1774,7 +1768,6 @@
     try {
       if (chart && chart.timeScale()) {
         time = chart.timeScale().coordinateToTime(px);
-        console.log('[EOD] 🔍 coordinateToTime result:', time, 'for px:', px);
       } else {
         console.error('[EOD] ❌ Chart or timeScale not available');
       }
@@ -1785,7 +1778,6 @@
     try {
       if (candleSeries) {
         price = candleSeries.coordinateToPrice(py);
-        console.log('[EOD] 🔍 coordinateToPrice result:', price, 'for py:', py);
       } else {
         console.error('[EOD] ❌ candleSeries not available');
       }
@@ -1793,7 +1785,53 @@
       console.error('[EOD] ❌ Error in coordinateToPrice:', error);
     }
     
-    // Reset unified drag state
+    // HANDLE DRAWING MODE CLICKS FIRST
+    if (unifiedDragState.drawingMode) {
+      console.log('[EOD] ✏️ Drawing mode click - tool:', unifiedDragState.drawingTool);
+      
+      // Validate coordinates
+      if (!time || !price || !isFinite(time) || !isFinite(price) || price <= 0) {
+        console.log('[EOD] ⚠️ Invalid coordinates for drawing - skipping');
+        return;
+      }
+      
+      if (unifiedDragState.drawingTool === 'level') {
+        // Add horizontal level
+        addLevel(price);
+        console.log('[EOD] ✅ Level added at', price.toFixed(2));
+        // Auto-disable drawing mode
+        unifiedDragState.drawingMode = false;
+        $('#level-tool').classList.remove('active');
+        document.body.classList.remove('drawing-mode');
+        return;
+      } else if (unifiedDragState.drawingTool === 'trendline') {
+        if (!unifiedDragState.trendlineStart) {
+          // First click: set start point
+          unifiedDragState.trendlineStart = { time, price };
+          enableTrendlinePreview();
+          console.log('[EOD] ✅ Trendline started - click second point');
+          return;
+        } else {
+          // Second click: complete trendline
+          disableTrendlinePreview();
+          addTrendline(
+            unifiedDragState.trendlineStart.time, 
+            unifiedDragState.trendlineStart.price, 
+            time, 
+            price
+          );
+          console.log('[EOD] ✅ Trendline added');
+          // Auto-disable drawing mode
+          unifiedDragState.drawingMode = false;
+          unifiedDragState.trendlineStart = null;
+          $('#trendline-tool').classList.remove('active');
+          document.body.classList.remove('drawing-mode');
+          return;
+        }
+      }
+    }
+    
+    // Reset unified drag state for normal drag operations
     resetDragState();
     
     // Set initial coordinates
