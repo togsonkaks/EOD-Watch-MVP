@@ -47,6 +47,32 @@ A comprehensive multi-symbol stock watchlist platform with advanced drawing tool
 - Uses `TIINGO_TOKEN` environment variable for API authentication
 - Deployment configured for VM target to maintain persistent connection
 
+## Recent Changes (2025-10-28)
+
+### Phase 6: Critical Coordinate System Fixes (Completed)
+**Complete Trendline Interaction System Restoration**
+- **Root Cause Fixed**: Eliminated broken coordinate conversion chain `safeLogicalToChart(safeChartToLogical(px))` that was returning null
+- **Direct API Migration**: Replaced all broken conversions with direct Lightweight Charts APIs:
+  - Time conversion: `chart.timeScale().coordinateToTime(px)` (direct, no intermediates)
+  - Price conversion: `candleSeries.coordinateToPrice(py)` and `candleSeries.priceToCoordinate(price)` (direct)
+- **Three Critical Fixes**:
+  1. `onPointerDown()` - Fixed drawing click handler for trendline creation
+  2. `renderOverlayImmediate()` - Fixed trendline rendering to sync with chart pan/zoom
+  3. `processPointer()` - Fixed drag coordinate processing for editing/moving/resizing
+
+**Trendline Functionality Restored**
+- ✅ Trendlines can be drawn using 2-click method
+- ✅ Trendlines synchronize perfectly with chart panning and zooming
+- ✅ Trendlines can be selected, moved, resized (drag endpoints)
+- ✅ Horizontal levels work identically with same coordinate fixes
+- ✅ All drawings persist correctly across sessions
+
+**Technical Notes**
+- The broken coordinate chain was attempting logical-to-screen conversions with intermediate steps
+- Direct Lightweight Charts v4.1.3 APIs provide reliable screen-space coordinates
+- Chart autoScale changed from false to true for proper candle visibility
+- All coordinate conversions now use validated, direct APIs with proper error handling
+
 ## Recent Changes (2025-09-21)
 
 ### Phase 5: Professional Signal Detection & Test Mode System (Completed)
