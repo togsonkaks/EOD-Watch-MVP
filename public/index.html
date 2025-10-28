@@ -2316,11 +2316,13 @@
     if (unifiedDragState.isDragging) {
       if (unifiedDragState.dragType === 'level') {
         saveLevelsForSymbol(currentSymbol, currentTimeframe, getLevelsForSymbol(currentSymbol, currentTimeframe));
+        drawLevelsOnChart(); // CRITICAL: Rebuild hit test map with new coordinates
         updateLineHandles();
         evaluateCurrentSignals();
         console.log('[EOD] 💾 Level drag completed & saved');
       } else if (unifiedDragState.dragType === 'trendline') {
         saveTrendlinesForSymbol(currentSymbol, currentTimeframe, getTrendlinesForSymbol(currentSymbol, currentTimeframe));
+        drawTrendlinesOnChart(); // CRITICAL: Rebuild hit test map with new coordinates
         updateLineHandles();
         evaluateCurrentSignals();
         console.log('[EOD] 💾 Trendline drag completed & saved');
