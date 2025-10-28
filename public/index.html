@@ -846,6 +846,7 @@
     unifiedDragState.currentPrice = null;
     unifiedDragState.originalData = null;
     unifiedDragState.modifiedTrendlines = null;
+    unifiedDragState.modifiedLevels = null;
     unifiedDragState.hasMoved = false;
     unifiedDragState.pendingDrag = null;
     
@@ -1663,6 +1664,10 @@
             time: false,
             price: false
           }
+        },
+        kineticScroll: {
+          touch: false,
+          mouse: false
         }
       });
     } else {
@@ -1683,6 +1688,10 @@
             time: true,
             price: true
           }
+        },
+        kineticScroll: {
+          touch: true,
+          mouse: true
         }
       });
     }
@@ -2121,7 +2130,11 @@
   function handleLevelDrag() {
     if (!unifiedDragState.dragTarget || !Number.isFinite(unifiedDragState.currentPrice)) return;
     
-    const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+    // CRITICAL: Use the SAME array we loaded at drag start - don't reload from storage!
+    if (!unifiedDragState.modifiedLevels) {
+      unifiedDragState.modifiedLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
+    }
+    const levels = unifiedDragState.modifiedLevels;
     const levelIndex = levels.findIndex(l => l.id === unifiedDragState.dragTarget.id);
     
     if (levelIndex >= 0 && levels[levelIndex].price !== unifiedDragState.currentPrice) {
@@ -2154,7 +2167,11 @@
         !Number.isFinite(unifiedDragState.currentTime) || 
         !Number.isFinite(unifiedDragState.currentPrice)) return;
     
-    const trendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    // CRITICAL: Use the SAME array we loaded at drag start - don't reload from storage every frame!
+    if (!unifiedDragState.modifiedTrendlines) {
+      unifiedDragState.modifiedTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    }
+    const trendlines = unifiedDragState.modifiedTrendlines;
     const trendlineIndex = trendlines.findIndex(t => t.id === unifiedDragState.dragTarget.id);
     
     if (trendlineIndex < 0) return;
@@ -2241,9 +2258,7 @@
         // Update stored data reference
         rec.data = trendline;
       }
-      
-      // Store modified array for later save (don't save every frame - kills performance)
-      unifiedDragState.modifiedTrendlines = trendlines;
+      // modifiedTrendlines array is already being updated in-place above - no need to re-store
     }
   }
 
@@ -2332,21 +2347,17 @@
     // HANDLE DRAG END - finalize: save to storage, rebuild handles once, clear drag states
     if (unifiedDragState.isDragging) {
       if (unifiedDragState.dragType === 'level') {
-        saveLevelsForSymbol(currentSymbol, currentTimeframe, getLevelsForSymbol(currentSymbol, currentTimeframe));
+        // CRITICAL: Save the MODIFIED array that was updated during drag
+        const dataToSave = unifiedDragState.modifiedLevels || getLevelsForSymbol(currentSymbol, currentTimeframe);
+        saveLevelsForSymbol(currentSymbol, currentTimeframe, dataToSave);
         drawLevelsOnChart(); // CRITICAL: Rebuild hit test map with new coordinates
         updateLineHandles();
         evaluateCurrentSignals();
         console.log('[EOD] 💾 Level drag completed & saved');
       } else if (unifiedDragState.dragType === 'trendline') {
-        // CRITICAL: Save the MODIFIED array, not the original from storage
+        // CRITICAL: Save the MODIFIED array that was updated during drag
         const dataToSave = unifiedDragState.modifiedTrendlines || getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-        console.log('[EOD] 🔍 Saving trendlines:', dataToSave?.length, 'trendlines, first:', dataToSave?.[0]);
         saveTrendlinesForSymbol(currentSymbol, currentTimeframe, dataToSave);
-        
-        // Verify save worked
-        const reloaded = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-        console.log('[EOD] 🔍 Reloaded after save:', reloaded?.length, 'trendlines, first:', reloaded?.[0]);
-        
         drawTrendlinesOnChart(); // CRITICAL: Rebuild hit test map with new coordinates
         updateLineHandles();
         evaluateCurrentSignals();
