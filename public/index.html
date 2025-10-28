@@ -2599,12 +2599,29 @@
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       
-      const logical = chartToLogical(x);
-      const price = chartToPrice(y);
+      // Use DIRECT coordinate conversion APIs - no logical intermediates
+      let time = null;
+      let price = null;
       
-      console.log('[EOD] 🎯 Processing overlay click - logical:', logical, 'price:', price);
+      try {
+        if (chart && chart.timeScale()) {
+          time = chart.timeScale().coordinateToTime(x);
+        }
+      } catch (error) {
+        console.error('[EOD] ❌ coordinateToTime error:', error);
+      }
       
-      if (logical !== null && price !== null && !isNaN(logical) && !isNaN(price)) {
+      try {
+        if (candleSeries) {
+          price = candleSeries.coordinateToPrice(y);
+        }
+      } catch (error) {
+        console.error('[EOD] ❌ coordinateToPrice error:', error);
+      }
+      
+      console.log('[EOD] 🎯 Processing overlay click - time:', time, 'price:', price);
+      
+      if (time !== null && price !== null && !isNaN(time) && !isNaN(price) && isFinite(time) && isFinite(price)) {
         if (unifiedDragState.drawingTool === 'level') {
           overlayAddLevel(price);
           unifiedDragState.drawingMode = false;
@@ -2614,16 +2631,16 @@
           console.log('[EOD] ✅ Overlay level completed');
         } else if (unifiedDragState.drawingTool === 'trendline') {
           if (!unifiedDragState.trendlineStart) {
-            unifiedDragState.trendlineStart = { logical, price };
+            // Store time and price directly - no logical coordinates!
+            unifiedDragState.trendlineStart = { time, price };
             console.log('[EOD] Trendline started, click second point');
           } else {
-            // Convert logical coordinates to time using the chart API
-            const startTime = chart.timeScale().coordinateToTime(chart.timeScale().logicalToCoordinate(unifiedDragState.trendlineStart.logical));
-            const endTime = chart.timeScale().coordinateToTime(chart.timeScale().logicalToCoordinate(logical));
-            
+            // Use stored time and price directly
             overlayAddTrendline(
-              startTime, unifiedDragState.trendlineStart.price,
-              endTime, price
+              unifiedDragState.trendlineStart.time, 
+              unifiedDragState.trendlineStart.price,
+              time, 
+              price
             );
             unifiedDragState.trendlineStart = null;
             unifiedDragState.drawingMode = false;
@@ -2633,6 +2650,8 @@
             console.log('[EOD] ✅ Overlay trendline completed');
           }
         }
+      } else {
+        console.warn('[EOD] ⚠️ Invalid coordinates for overlay drawing - time:', time, 'price:', price);
       }
       
       // Re-enable chart interactions
