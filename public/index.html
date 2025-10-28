@@ -876,9 +876,9 @@
     });
   }
   
-  // ==== RAF CODE REMOVED - Using direct canvas overlay mouse events now ====
-  // let rafToken = null;
-  // let lastPointer = null;
+  // ==== RAF CODE FOR POINTER EVENT HANDLING ====
+  let rafToken = null;
+  let lastPointer = null;
 
   // ==== SCREEN-SPACE HIT TESTING FOR RELIABLE LINE SELECTION ====
   function dist2(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy; }
@@ -1644,9 +1644,8 @@
     }
   }
 
-  // ==== PERFORMANCE FREEZING DISABLED - Not needed with canvas overlay ====
-  /*
-  function freezeDuringDrag_OLD(on) {
+  // ==== PERFORMANCE FREEZING ====
+  function freezeDuringDrag(on) {
     if (on) {
       // FREEZE: Disable all chart interactions during drag
       chart.applyOptions({
@@ -1697,8 +1696,6 @@
       });
     }
   }
-  */
-  // END OF freezeDuringDrag function
 
   // ==== INTELLIGENT TRENDLINE EXTENSION SYSTEM ====
   
