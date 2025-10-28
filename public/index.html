@@ -661,8 +661,9 @@
     originalTrendline: null,
     dragOffset: null,
     
-    // Pointer capture element
+    // Pointer capture
     capturedElement: null,
+    capturedPointerId: null,
     
     // State tracking
     hasMoved: false,
@@ -848,13 +849,14 @@
     unifiedDragState.pendingDrag = null;
     
     // Release pointer capture if active
-    if (unifiedDragState.capturedElement) {
+    if (unifiedDragState.capturedElement && unifiedDragState.capturedPointerId !== null) {
       try {
-        unifiedDragState.capturedElement.releasePointerCapture && unifiedDragState.capturedElement.releasePointerCapture(1);
+        unifiedDragState.capturedElement.releasePointerCapture(unifiedDragState.capturedPointerId);
       } catch (e) {
         console.warn('[EOD] ⚠️ Error releasing pointer capture:', e);
       }
       unifiedDragState.capturedElement = null;
+      unifiedDragState.capturedPointerId = null;
     }
   }
   
@@ -1899,6 +1901,7 @@
         try {
           chartContainer.setPointerCapture(e.pointerId);
           unifiedDragState.capturedElement = chartContainer;
+          unifiedDragState.capturedPointerId = e.pointerId;
         } catch (captureError) {
           console.warn('[EOD] ⚠️ Could not set pointer capture:', captureError);
         }
@@ -1923,6 +1926,7 @@
         try {
           chartContainer.setPointerCapture(e.pointerId);
           unifiedDragState.capturedElement = chartContainer;
+          unifiedDragState.capturedPointerId = e.pointerId;
         } catch (captureError) {
           console.warn('[EOD] ⚠️ Could not set pointer capture:', captureError);
         }
@@ -2182,8 +2186,24 @@
     const rect = chartContainer.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
-    const time = safeLogicalToTime(safeChartToLogical(px));
-    const price = safeChartToPrice(py);
+    
+    // Use DIRECT coordinate conversion - no broken logical chain
+    let time = null;
+    let price = null;
+    try {
+      if (chart && chart.timeScale()) {
+        time = chart.timeScale().coordinateToTime(px);
+      }
+    } catch (error) {
+      // Silently handle
+    }
+    try {
+      if (candleSeries) {
+        price = candleSeries.coordinateToPrice(py);
+      }
+    } catch (error) {
+      // Silently handle
+    }
     
     // Calculate gesture stats
     const deltaX = Math.abs(px - unifiedDragState.startX);
@@ -2584,7 +2604,11 @@
 
   // ===== OVERLAY DRAG HANDLERS =====
   function setupOverlayDragHandlers() {
+    // DISABLED: Overlay canvas no longer intercepts pointer events
+    // All drag operations now handled by unified pointer system on chart container
+    // Overlay canvas set to pointer-events: none in CSS to allow events to pass through
     
+    /* COMMENTED OUT - BLOCKING UNIFIED DRAG SYSTEM
     // Mouse move handler for dragging
     overlayCanvas.addEventListener('pointermove', (e) => {
       if (!unifiedDragState.dragTarget) return;
@@ -2703,6 +2727,8 @@
       unifiedDragState.originalTrendline = null;
       overlayCanvas.style.cursor = 'default';
     });
+    */
+    // END OF COMMENTED OUT OVERLAY DRAG HANDLERS
   }
 
   // ===== DRAG POSITION UPDATING FUNCTIONS =====
@@ -2922,9 +2948,9 @@
   }
   
   function updateHoverFeedback() {
-    // SMART POINTER EVENTS: Only intercept when hovering lines or in drawing mode
-    const shouldIntercept = unifiedDragState.drawingMode || hoveredDrawing || unifiedDragState.isDragging;
-    overlayCanvas.style.pointerEvents = shouldIntercept ? 'auto' : 'none';
+    // DISABLED: Keep overlay canvas transparent to pointer events permanently
+    // The unified drag system on chart container handles all interactions
+    overlayCanvas.style.pointerEvents = 'none';
     
     // Update cursor based on state
     if (unifiedDragState.isDragging) {
