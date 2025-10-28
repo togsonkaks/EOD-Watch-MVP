@@ -5000,21 +5000,78 @@
   }
 
   function drawTrendlinesOnChart() {
-    // NEW CANVAS OVERLAY SYSTEM - no LineSeries creation!
-    // Just update the canvas overlay with the latest trendlines
     const symbolTrendlines = (getTrendlinesForSymbol(currentSymbol, currentTimeframe) || [])
       .filter(t =>
         t && t.id != null &&
         Number.isFinite(t.startTime) && Number.isFinite(t.endTime) &&
         Number.isFinite(t.startPrice) && Number.isFinite(t.endPrice)
       );
-    
-    // Update canvas overlay if it exists
-    if (canvasOverlay) {
-      canvasOverlay.updateTrendlines(symbolTrendlines);
+
+    // Remove deleted trendlines
+    for (const [id, rec] of trendSeriesById.entries()) {
+      if (!symbolTrendlines.find(t => t.id === id)) {
+        try { 
+          chart.removeSeries(rec.series); 
+        } catch (e) {
+          console.warn('[EOD] Failed to remove trendline series:', e);
+        }
+        trendSeriesById.delete(id);
+      }
     }
-    
-    // For compatibility, keep currentTrendlines array (but it's not used for rendering)
+
+    // Add or update trendlines
+    for (const t of symbolTrendlines) {
+      const existing = trendSeriesById.get(t.id);
+      const lineData = [
+        { time: t.startTime, value: t.startPrice },
+        { time: t.endTime, value: t.endPrice }
+      ];
+
+      if (!existing) {
+        // Create new LineSeries for this trendline
+        const series = chart.addLineSeries({
+          color: t.selected ? '#22d3ee' : (t.color || '#f59e0b'),
+          lineWidth: t.selected ? 3 : 2,
+          lineStyle: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false
+        });
+        series.setData(lineData);
+        trendSeriesById.set(t.id, { series, data: t });
+      } else {
+        // Update existing series if data or style changed
+        const changed = 
+          existing.data.startTime !== t.startTime ||
+          existing.data.startPrice !== t.startPrice ||
+          existing.data.endTime !== t.endTime ||
+          existing.data.endPrice !== t.endPrice ||
+          existing.data.selected !== t.selected ||
+          existing.data.color !== t.color;
+        
+        if (changed) {
+          // Remove and recreate (simpler than updating options)
+          try { 
+            chart.removeSeries(existing.series); 
+          } catch (e) {
+            console.warn('[EOD] Failed to remove trendline for update:', e);
+          }
+          const series = chart.addLineSeries({
+            color: t.selected ? '#22d3ee' : (t.color || '#f59e0b'),
+            lineWidth: t.selected ? 3 : 2,
+            lineStyle: 0,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false
+          });
+          series.setData(lineData);
+          trendSeriesById.set(t.id, { series, data: t });
+        } else {
+          existing.data = t;
+        }
+      }
+    }
+
     currentTrendlines = symbolTrendlines;
   }
 
