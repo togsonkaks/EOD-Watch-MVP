@@ -876,9 +876,9 @@
     });
   }
   
-  // ==== SINGLE RAF LOOP FOR 60FPS SMOOTH UPDATES ====
-  let rafToken = null;
-  let lastPointer = null;
+  // ==== RAF CODE REMOVED - Using direct canvas overlay mouse events now ====
+  // let rafToken = null;
+  // let lastPointer = null;
 
   // ==== SCREEN-SPACE HIT TESTING FOR RELIABLE LINE SELECTION ====
   function dist2(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy; }
@@ -1644,8 +1644,9 @@
     }
   }
 
-  // ==== PERFORMANCE FREEZING DURING DRAG ====
-  function freezeDuringDrag(on) {
+  // ==== PERFORMANCE FREEZING DISABLED - Not needed with canvas overlay ====
+  /*
+  function freezeDuringDrag_OLD(on) {
     if (on) {
       // FREEZE: Disable all chart interactions during drag
       chart.applyOptions({
@@ -1696,6 +1697,8 @@
       });
     }
   }
+  */
+  // END OF freezeDuringDrag function
 
   // ==== INTELLIGENT TRENDLINE EXTENSION SYSTEM ====
   
@@ -1809,11 +1812,12 @@
     };
   }
 
-  // ==== BUTTERY SMOOTH POINTER EVENT SYSTEM ====
-  // ===== UNIFIED POINTER EVENT HANDLERS WITH CAPTURE =====
-  // Legacy pointerDownState removed - using unifiedDragState now
-
-  function onPointerDown(e) {
+  // ==== OLD POINTER EVENT SYSTEM - DISABLED ====
+  // This has been replaced by simple canvas overlay mouse handlers
+  // See setupCanvasOverlayMouseHandlers() for the new implementation
+  
+  /*
+  function onPointerDown_OLD(e) {
     const chartContainer = document.getElementById('chart');
     
     // Get coordinates with safety checks
@@ -2370,6 +2374,8 @@
     lastPointer = null;
     chartContainer.style.cursor = '';
   }
+  */
+  // END OF OLD POINTER EVENT SYSTEM - All replaced by canvas overlay mouse handlers
 
   // ==== RIGHT-CLICK CONTEXT MENU HANDLER ====
   function onContextMenu(e) {
@@ -2582,10 +2588,338 @@
     console.log('[EOD] 🚀 DOM ready - initializing chart');
     if (initializeChart()) {
       console.log('[EOD] ✅ Chart initialized successfully');
+      // Initialize canvas overlay system after chart is ready
+      setTimeout(() => initCanvasOverlaySystem(), 100);
     } else {
       console.error('[EOD] ❌ Chart initialization failed');
     }
   });
+
+  // ==== CANVAS OVERLAY SYSTEM FOR TRENDLINES ====
+  // Independent canvas layer that sits above the chart, rendering lines at screen coordinates
+  // This eliminates coordinate conversion issues and chart interference
+  class CanvasOverlay {
+    constructor(chartElement, chartInstance, candleSeriesInstance) {
+      this.chartElement = chartElement;
+      this.chart = chartInstance;
+      this.candleSeries = candleSeriesInstance;
+      
+      // Create overlay canvas
+      this.canvas = document.getElementById('drawing-overlay');
+      if (!this.canvas) {
+        console.error('[OVERLAY] ❌ Drawing overlay canvas not found');
+        return;
+      }
+      
+      this.ctx = this.canvas.getContext('2d');
+      this.resize();
+      
+      // Trendlines and levels to render
+      this.trendlines = [];
+      this.levels = [];
+      
+      // Drag state
+      this.dragTarget = null;
+      this.dragMode = null; // 'move', 'start', 'end'
+      this.dragStartX = 0;
+      this.dragStartY = 0;
+      this.originalTrendline = null;
+      
+      console.log('[OVERLAY] ✅ Canvas overlay initialized');
+    }
+    
+    resize() {
+      const rect = this.canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      this.canvas.width = rect.width * dpr;
+      this.canvas.height = rect.height * dpr;
+      this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.ctx.scale(dpr, dpr);
+      this.canvas.style.width = rect.width + 'px';
+      this.canvas.style.height = rect.height + 'px';
+    }
+    
+    // Coordinate conversion: model space -> screen space
+    timeToX(time) {
+      try {
+        const coord = this.chart.timeScale().timeToCoordinate(time);
+        return coord !== null && isFinite(coord) ? coord : null;
+      } catch (e) {
+        return null;
+      }
+    }
+    
+    priceToY(price) {
+      try {
+        const coord = this.candleSeries.priceToCoordinate(price);
+        return coord !== null && isFinite(coord) ? coord : null;
+      } catch (e) {
+        return null;
+      }
+    }
+    
+    // Coordinate conversion: screen space -> model space
+    xToTime(x) {
+      try {
+        const time = this.chart.timeScale().coordinateToTime(x);
+        return time !== null && isFinite(time) ? time : null;
+      } catch (e) {
+        return null;
+      }
+    }
+    
+    yToPrice(y) {
+      try {
+        const price = this.candleSeries.coordinateToPrice(y);
+        return price !== null && isFinite(price) && price > 0 ? price : null;
+      } catch (e) {
+        return null;
+      }
+    }
+    
+    // Draw all trendlines on canvas
+    draw() {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      
+      // Draw each trendline
+      for (const t of this.trendlines) {
+        const x1 = this.timeToX(t.startTime);
+        const y1 = this.priceToY(t.startPrice);
+        const x2 = this.timeToX(t.endTime);
+        const y2 = this.priceToY(t.endPrice);
+        
+        if (x1 === null || y1 === null || x2 === null || y2 === null) continue;
+        
+        this.ctx.beginPath();
+        this.ctx.moveTo(x1, y1);
+        this.ctx.lineTo(x2, y2);
+        this.ctx.strokeStyle = t.selected ? '#22d3ee' : (t.color || '#f59e0b');
+        this.ctx.lineWidth = t.selected ? 3 : 2;
+        this.ctx.stroke();
+        
+        // Draw endpoint handles if selected
+        if (t.selected) {
+          this.ctx.fillStyle = '#22d3ee';
+          this.ctx.beginPath();
+          this.ctx.arc(x1, y1, 6, 0, Math.PI * 2);
+          this.ctx.fill();
+          this.ctx.beginPath();
+          this.ctx.arc(x2, y2, 6, 0, Math.PI * 2);
+          this.ctx.fill();
+        }
+      }
+    }
+    
+    // Hit test: find which trendline was clicked
+    hitTest(px, py) {
+      const tolerance = 12;
+      
+      for (const t of this.trendlines) {
+        const x1 = this.timeToX(t.startTime);
+        const y1 = this.priceToY(t.startPrice);
+        const x2 = this.timeToX(t.endTime);
+        const y2 = this.priceToY(t.endPrice);
+        
+        if (x1 === null || y1 === null || x2 === null || y2 === null) continue;
+        
+        // Check endpoint hits first (for resize handles)
+        const startDist = Math.hypot(px - x1, py - y1);
+        const endDist = Math.hypot(px - x2, py - y2);
+        
+        if (startDist <= tolerance) {
+          return { trendline: t, mode: 'start', x1, y1, x2, y2 };
+        }
+        if (endDist <= tolerance) {
+          return { trendline: t, mode: 'end', x1, y1, x2, y2 };
+        }
+        
+        // Check line body hit
+        const dist = this.pointToLineDistance(px, py, x1, y1, x2, y2);
+        if (dist <= tolerance) {
+          return { trendline: t, mode: 'move', x1, y1, x2, y2 };
+        }
+      }
+      
+      return null;
+    }
+    
+    pointToLineDistance(px, py, x1, y1, x2, y2) {
+      const A = px - x1;
+      const B = py - y1;
+      const C = x2 - x1;
+      const D = y2 - y1;
+      const dot = A * C + B * D;
+      const lenSq = C * C + D * D;
+      let param = -1;
+      if (lenSq != 0) param = dot / lenSq;
+      
+      let xx, yy;
+      if (param < 0) {
+        xx = x1;
+        yy = y1;
+      } else if (param > 1) {
+        xx = x2;
+        yy = y2;
+      } else {
+        xx = x1 + param * C;
+        yy = y1 + param * D;
+      }
+      
+      const dx = px - xx;
+      const dy = py - yy;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    
+    // Update trendlines from storage
+    updateTrendlines(trendlines) {
+      this.trendlines = trendlines || [];
+      this.draw();
+    }
+  }
+  
+  let canvasOverlay = null;
+  
+  function initCanvasOverlaySystem() {
+    if (!chart || !candleSeries) {
+      console.error('[OVERLAY] ❌ Chart or candleSeries not ready');
+      return;
+    }
+    
+    const chartElement = document.getElementById('chart');
+    canvasOverlay = new CanvasOverlay(chartElement, chart, candleSeries);
+    
+    // Load trendlines from storage
+    const trendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+    canvasOverlay.updateTrendlines(trendlines);
+    
+    // Subscribe to chart pan/zoom events to redraw
+    chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+      if (canvasOverlay) canvasOverlay.draw();
+    });
+    
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+      if (canvasOverlay) canvasOverlay.draw();
+    });
+    
+    // Setup simple mouse handlers on canvas overlay
+    setupCanvasOverlayMouseHandlers();
+    
+    // Resize observer
+    const resizeObserver = new ResizeObserver(() => {
+      if (canvasOverlay) {
+        canvasOverlay.resize();
+        canvasOverlay.draw();
+      }
+    });
+    resizeObserver.observe(chartElement);
+    
+    console.log('[OVERLAY] ✅ Canvas overlay system initialized');
+  }
+  
+  function setupCanvasOverlayMouseHandlers() {
+    const canvas = document.getElementById('drawing-overlay');
+    if (!canvas || !canvasOverlay) return;
+    
+    let isDragging = false;
+    let hitResult = null;
+    
+    // Enable pointer events on canvas for mouse interaction
+    canvas.style.pointerEvents = 'auto';
+    
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      
+      hitResult = canvasOverlay.hitTest(px, py);
+      if (hitResult) {
+        isDragging = true;
+        canvasOverlay.dragTarget = hitResult.trendline;
+        canvasOverlay.dragMode = hitResult.mode;
+        canvasOverlay.dragStartX = px;
+        canvasOverlay.dragStartY = py;
+        canvasOverlay.originalTrendline = {
+          startTime: hitResult.trendline.startTime,
+          startPrice: hitResult.trendline.startPrice,
+          endTime: hitResult.trendline.endTime,
+          endPrice: hitResult.trendline.endPrice
+        };
+        
+        // Mark as selected
+        canvasOverlay.trendlines.forEach(t => t.selected = (t.id === hitResult.trendline.id));
+        canvasOverlay.draw();
+        
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    });
+    
+    canvas.addEventListener('mousemove', (e) => {
+      if (!isDragging || !canvasOverlay.dragTarget) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      
+      const currentTime = canvasOverlay.xToTime(px);
+      const currentPrice = canvasOverlay.yToPrice(py);
+      
+      if (currentTime === null || currentPrice === null) return;
+      
+      const target = canvasOverlay.dragTarget;
+      const original = canvasOverlay.originalTrendline;
+      
+      if (canvasOverlay.dragMode === 'move') {
+        // Move entire line
+        const startTime = canvasOverlay.xToTime(canvasOverlay.dragStartX);
+        const startPrice = canvasOverlay.yToPrice(canvasOverlay.dragStartY);
+        if (startTime === null || startPrice === null) return;
+        
+        const deltaTime = currentTime - startTime;
+        const deltaPrice = currentPrice - startPrice;
+        
+        target.startTime = original.startTime + deltaTime;
+        target.startPrice = original.startPrice + deltaPrice;
+        target.endTime = original.endTime + deltaTime;
+        target.endPrice = original.endPrice + deltaPrice;
+        
+      } else if (canvasOverlay.dragMode === 'start') {
+        // Move start point
+        target.startTime = currentTime;
+        target.startPrice = currentPrice;
+        
+      } else if (canvasOverlay.dragMode === 'end') {
+        // Move end point
+        target.endTime = currentTime;
+        target.endPrice = currentPrice;
+      }
+      
+      canvasOverlay.draw();
+      e.preventDefault();
+    });
+    
+    canvas.addEventListener('mouseup', (e) => {
+      if (isDragging && canvasOverlay.dragTarget) {
+        // Save to localStorage
+        saveTrendlinesForSymbol(currentSymbol, currentTimeframe, canvasOverlay.trendlines);
+        updateTrendlinesList();
+        console.log('[OVERLAY] ✅ Trendline saved');
+      }
+      
+      isDragging = false;
+      canvasOverlay.dragTarget = null;
+      canvasOverlay.dragMode = null;
+      hitResult = null;
+    });
+    
+    canvas.addEventListener('mouseleave', (e) => {
+      if (isDragging) {
+        canvas.dispatchEvent(new MouseEvent('mouseup', e));
+      }
+    });
+    
+    console.log('[OVERLAY] ✅ Mouse handlers setup');
+  }
 
   // ===== INITIALIZE OVERLAY SYSTEM AFTER CHART AND SERIES CREATION =====
   function attemptOverlayInitialization(retries = 3) {
@@ -4640,69 +4974,22 @@
   }
 
   function drawTrendlinesOnChart() {
+    // NEW CANVAS OVERLAY SYSTEM - no LineSeries creation!
+    // Just update the canvas overlay with the latest trendlines
     const symbolTrendlines = (getTrendlinesForSymbol(currentSymbol, currentTimeframe) || [])
       .filter(t =>
         t && t.id != null &&
         Number.isFinite(t.startTime) && Number.isFinite(t.endTime) &&
         Number.isFinite(t.startPrice) && Number.isFinite(t.endPrice)
       );
-
-    // --- remove ones that no longer exist ---
-    for (const [id, rec] of trendSeriesById.entries()) {
-      if (!symbolTrendlines.find(t => t.id === id)) {
-        chart.removeSeries(rec.series);
-        trendSeriesById.delete(id);
-      }
+    
+    // Update canvas overlay if it exists
+    if (canvasOverlay) {
+      canvasOverlay.updateTrendlines(symbolTrendlines);
     }
-
-    // --- upsert the rest (no full clear) ---
-    for (const t of symbolTrendlines) {
-      // Apply line extent capping to prevent infinite projection
-      const cappedTrendline = capTrendlineExtent(t);
-      
-      const inRange =
-        isTimeInVisibleRange(cappedTrendline.startTime) || isTimeInVisibleRange(cappedTrendline.endTime);
-      if (!inRange) continue; // don't expand chart
-
-      const lineData = [
-        { time: cappedTrendline.startTime, value: cappedTrendline.startPrice },
-        { time: cappedTrendline.endTime,   value: cappedTrendline.endPrice   },
-      ];
-      if (!lineData.every(p => Number.isFinite(p.time) && Number.isFinite(p.value))) continue;
-
-      let rec = trendSeriesById.get(t.id);
-      if (!rec) {
-        // Visual styling with capping indicator
-        const lineColor = t.selected ? '#22d3ee' : (cappedTrendline.isCapped ? '#fbbf24' : (t.color || '#f59e0b'));
-        const lineStyle = cappedTrendline.isCapped ? 1 : 0; // Dashed if capped
-        
-        const series = chart.addLineSeries({
-          color: lineColor,
-          lineWidth: t.selected ? 5 : 2,
-          lineStyle: lineStyle,
-        });
-        // stop autoscale influence
-        series.applyOptions({ autoscaleInfoProvider: () => null });
-        rec = { series, data: cappedTrendline };
-        trendSeriesById.set(t.id, rec);
-      } else {
-        // only restyle if selection/color changed
-        const lineColor = t.selected ? '#22d3ee' : (cappedTrendline.isCapped ? '#fbbf24' : (t.color || '#f59e0b'));
-        const lineStyle = cappedTrendline.isCapped ? 1 : 0; // Dashed if capped
-        
-        rec.series.applyOptions({
-          color: lineColor,
-          lineWidth: t.selected ? 5 : 2,
-          lineStyle: lineStyle,
-        });
-        rec.data = cappedTrendline;
-      }
-
-      rec.series.setData(lineData);
-    }
-
-    // mirror into your external array if other code reads it
-    currentTrendlines = [...trendSeriesById.values()].map(r => r.series);
+    
+    // For compatibility, keep currentTrendlines array (but it's not used for rendering)
+    currentTrendlines = symbolTrendlines;
   }
 
   function drawLevelsOnChart() {
@@ -4815,12 +5102,13 @@
       }
     }); */
 
-    // ==== SETUP BUTTERY SMOOTH POINTER EVENTS ====
+    // ==== OLD POINTER EVENT LISTENERS - DISABLED ====
+    // These have been replaced by canvas overlay mouse handlers
     let chartContainer = document.getElementById('chart');
-    chartContainer.addEventListener('pointerdown', onPointerDown);
-    chartContainer.addEventListener('pointermove', onPointerMove, { passive: false }); // CRITICAL: passive:false allows preventDefault during drag
-    chartContainer.addEventListener('pointerup', onPointerUp);
-    chartContainer.addEventListener('pointercancel', onPointerUp);
+    // chartContainer.addEventListener('pointerdown', onPointerDown);
+    // chartContainer.addEventListener('pointermove', onPointerMove, { passive: false });
+    // chartContainer.addEventListener('pointerup', onPointerUp);
+    // chartContainer.addEventListener('pointercancel', onPointerUp);
     chartContainer.addEventListener('contextmenu', onContextMenu);
 
     // Keep mousemove only for trendline preview (non-performance critical)
