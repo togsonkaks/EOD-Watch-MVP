@@ -1009,6 +1009,11 @@
     return null;
   }
 
+  // Alias for hit testing trendlines on click
+  function detectTrendlineClick(px, py) {
+    return hitTestTrendlines(px, py, 10);
+  }
+
   function hitTestLevel(px, py, tolerancePx = 8){
     for (const [id, rec] of levelLineById.entries()){
       const y = candleSeries.priceToCoordinate(rec.data.price);
@@ -1016,6 +1021,11 @@
       if (Math.abs(py - y) <= tolerancePx) return { id };
     }
     return null;
+  }
+  
+  // Alias for hit testing levels on click
+  function detectLevelClick(px, py) {
+    return hitTestLevel(px, py, 8);
   }
 
   // ==== CONTEXT MENU SYSTEM ====
@@ -1978,6 +1988,12 @@
 
   function onPointerMove(e) {
     lastPointer = e; // stash the latest event
+    
+    // CRITICAL: If dragging, prevent ALL default chart behavior
+    if (unifiedDragState.isDragging) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     
     // Update current coordinates with safety checks
     const rect = document.getElementById('chart').getBoundingClientRect();
@@ -4764,7 +4780,7 @@
     // ==== SETUP BUTTERY SMOOTH POINTER EVENTS ====
     let chartContainer = document.getElementById('chart');
     chartContainer.addEventListener('pointerdown', onPointerDown);
-    chartContainer.addEventListener('pointermove', onPointerMove, { passive: true });
+    chartContainer.addEventListener('pointermove', onPointerMove, { passive: false }); // CRITICAL: passive:false allows preventDefault during drag
     chartContainer.addEventListener('pointerup', onPointerUp);
     chartContainer.addEventListener('pointercancel', onPointerUp);
     chartContainer.addEventListener('contextmenu', onContextMenu);
