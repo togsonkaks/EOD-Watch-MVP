@@ -2772,7 +2772,13 @@
     
     // Update trendlines from storage
     updateTrendlines(trendlines) {
-      this.trendlines = trendlines || [];
+      const valid = (trendlines || []).filter(t => {
+        return t && t.id != null &&
+          Number.isFinite(t.startTime) && Number.isFinite(t.endTime) &&
+          Number.isFinite(t.startPrice) && Number.isFinite(t.endPrice) &&
+          t.startPrice > 0 && t.endPrice > 0;
+      });
+      this.trendlines = valid;
       this.draw();
     }
   }
@@ -2831,6 +2837,51 @@
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
       
+      const time = canvasOverlay.xToTime(px);
+      const price = canvasOverlay.yToPrice(py);
+      
+      // Check if we're in drawing mode for trendline creation
+      if (unifiedDragState.drawingMode && unifiedDragState.drawingTool === 'trendline' && time && price) {
+        if (!unifiedDragState.trendlineStart) {
+          // First click: set start point
+          unifiedDragState.trendlineStart = { time, price };
+          console.log('[OVERLAY] ✅ Trendline started at', price.toFixed(2));
+          return;
+        } else {
+          // Second click: complete trendline
+          const startTime = unifiedDragState.trendlineStart.time;
+          const startPrice = unifiedDragState.trendlineStart.price;
+          
+          // Create new trendline
+          const newTrendline = {
+            id: Date.now().toString(),
+            startTime: startTime,
+            startPrice: startPrice,
+            endTime: time,
+            endPrice: price,
+            color: '#f59e0b',
+            selected: false
+          };
+          
+          canvasOverlay.trendlines.push(newTrendline);
+          saveTrendlinesForSymbol(currentSymbol, currentTimeframe, canvasOverlay.trendlines);
+          canvasOverlay.draw();
+          updateTrendlinesList();
+          
+          // Reset drawing state
+          unifiedDragState.trendlineStart = null;
+          unifiedDragState.drawingMode = false;
+          $('#trendline-tool').classList.remove('active');
+          document.body.classList.remove('drawing-mode');
+          
+          console.log('[OVERLAY] ✅ Trendline created from', startPrice.toFixed(2), 'to', price.toFixed(2));
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+      }
+      
+      // Otherwise check for dragging existing trendlines
       hitResult = canvasOverlay.hitTest(px, py);
       if (hitResult) {
         isDragging = true;
