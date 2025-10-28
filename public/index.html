@@ -1767,8 +1767,31 @@
     const rect = chartContainer.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
-    const time = safeLogicalToTime(safeChartToLogical(px));
-    const price = safeChartToPrice(py);
+    
+    let time = null;
+    let price = null;
+    
+    try {
+      if (chart && chart.timeScale()) {
+        time = chart.timeScale().coordinateToTime(px);
+        console.log('[EOD] 🔍 coordinateToTime result:', time, 'for px:', px);
+      } else {
+        console.error('[EOD] ❌ Chart or timeScale not available');
+      }
+    } catch (error) {
+      console.error('[EOD] ❌ Error in coordinateToTime:', error);
+    }
+    
+    try {
+      if (candleSeries) {
+        price = candleSeries.coordinateToPrice(py);
+        console.log('[EOD] 🔍 coordinateToPrice result:', price, 'for py:', py);
+      } else {
+        console.error('[EOD] ❌ candleSeries not available');
+      }
+    } catch (error) {
+      console.error('[EOD] ❌ Error in coordinateToPrice:', error);
+    }
     
     // Reset unified drag state
     resetDragState();
@@ -1881,8 +1904,25 @@
     const rect = document.getElementById('chart').getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
-    const time = safeLogicalToTime(safeChartToLogical(px));
-    const price = safeChartToPrice(py);
+    
+    let time = null;
+    let price = null;
+    
+    try {
+      if (chart && chart.timeScale()) {
+        time = chart.timeScale().coordinateToTime(px);
+      }
+    } catch (error) {
+      // Silently handle errors during move to avoid console spam
+    }
+    
+    try {
+      if (candleSeries) {
+        price = candleSeries.coordinateToPrice(py);
+      }
+    } catch (error) {
+      // Silently handle errors during move to avoid console spam
+    }
     
     unifiedDragState.currentX = px;
     unifiedDragState.currentY = py;
