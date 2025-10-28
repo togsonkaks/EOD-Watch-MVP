@@ -2561,117 +2561,13 @@
     }
     
     overlayCanvas.addEventListener('pointerdown', (e) => {
-      console.log('[EOD] 🎯 Overlay canvas clicked! Drawing mode:', unifiedDragState.drawingMode, 'Tool:', unifiedDragState.drawingTool);
-      
-      // Handle line selection when not in drawing mode
-      if (!unifiedDragState.drawingMode) {
-        if (hoveredDrawing) {
-          handleLineSelection(e, hoveredDrawing);
-        } else {
-          // Allow chart to handle the click
-          return;
-        }
+      // ONLY handle line selection - let main pointer handler do drawing
+      if (!unifiedDragState.drawingMode && hoveredDrawing) {
+        handleLineSelection(e, hoveredDrawing);
         return;
       }
-      
-      e.stopImmediatePropagation();
-      e.preventDefault();
-      
-      // Disable chart interactions during drawing
-      chart.applyOptions({ 
-        handleScroll: {
-          mouseWheel: false,
-          pressedMouseMove: false,
-          horzTouchDrag: false,
-          vertTouchDrag: false
-        },
-        handleScale: {
-          mouseWheel: false,
-          pinch: false,
-          axisPressedMouseMove: {
-            time: false,
-            price: false
-          }
-        }
-      });
-      
-      const rect = overlayCanvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      
-      // Use DIRECT coordinate conversion APIs - no logical intermediates
-      let time = null;
-      let price = null;
-      
-      try {
-        if (chart && chart.timeScale()) {
-          time = chart.timeScale().coordinateToTime(x);
-        }
-      } catch (error) {
-        console.error('[EOD] ❌ coordinateToTime error:', error);
-      }
-      
-      try {
-        if (candleSeries) {
-          price = candleSeries.coordinateToPrice(y);
-        }
-      } catch (error) {
-        console.error('[EOD] ❌ coordinateToPrice error:', error);
-      }
-      
-      console.log('[EOD] 🎯 Processing overlay click - time:', time, 'price:', price);
-      
-      if (time !== null && price !== null && !isNaN(time) && !isNaN(price) && isFinite(time) && isFinite(price)) {
-        if (unifiedDragState.drawingTool === 'level') {
-          overlayAddLevel(price);
-          unifiedDragState.drawingMode = false;
-          $('#level-tool').classList.remove('active');
-          document.body.classList.remove('drawing-mode');
-          updateHoverFeedback();
-          console.log('[EOD] ✅ Overlay level completed');
-        } else if (unifiedDragState.drawingTool === 'trendline') {
-          if (!unifiedDragState.trendlineStart) {
-            // Store time and price directly - no logical coordinates!
-            unifiedDragState.trendlineStart = { time, price };
-            console.log('[EOD] Trendline started, click second point');
-          } else {
-            // Use stored time and price directly
-            overlayAddTrendline(
-              unifiedDragState.trendlineStart.time, 
-              unifiedDragState.trendlineStart.price,
-              time, 
-              price
-            );
-            unifiedDragState.trendlineStart = null;
-            unifiedDragState.drawingMode = false;
-            $('#trendline-tool').classList.remove('active');
-            document.body.classList.remove('drawing-mode');
-            updateHoverFeedback();
-            console.log('[EOD] ✅ Overlay trendline completed');
-          }
-        }
-      } else {
-        console.warn('[EOD] ⚠️ Invalid coordinates for overlay drawing - time:', time, 'price:', price);
-      }
-      
-      // Re-enable chart interactions
-      chart.applyOptions({ 
-        handleScroll: {
-          mouseWheel: true,
-          pressedMouseMove: true,
-          horzTouchDrag: true,
-          vertTouchDrag: true
-        },
-        handleScale: {
-          mouseWheel: true,
-          pinch: true,
-          axisPressedMouseMove: {
-            time: true,
-            price: true
-          }
-        }
-      });
-    }, { capture: true });
+      // In drawing mode OR no hover: allow main pointer handler to process
+    });
     
     // Update hover feedback when drawing mode changes
     $('#level-tool').addEventListener('click', () => updateHoverFeedback());
