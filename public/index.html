@@ -845,6 +845,7 @@
     unifiedDragState.currentTime = null;
     unifiedDragState.currentPrice = null;
     unifiedDragState.originalData = null;
+    unifiedDragState.modifiedTrendlines = null;
     unifiedDragState.hasMoved = false;
     unifiedDragState.pendingDrag = null;
     
@@ -2241,8 +2242,8 @@
         rec.data = trendline;
       }
       
-      // CRITICAL FIX: Save to storage during drag so changes persist
-      saveTrendlinesForSymbol(currentSymbol, currentTimeframe, trendlines);
+      // Store modified array for later save (don't save every frame - kills performance)
+      unifiedDragState.modifiedTrendlines = trendlines;
     }
   }
 
@@ -2337,7 +2338,9 @@
         evaluateCurrentSignals();
         console.log('[EOD] 💾 Level drag completed & saved');
       } else if (unifiedDragState.dragType === 'trendline') {
-        saveTrendlinesForSymbol(currentSymbol, currentTimeframe, getTrendlinesForSymbol(currentSymbol, currentTimeframe));
+        // CRITICAL: Save the MODIFIED array, not the original from storage
+        const dataToSave = unifiedDragState.modifiedTrendlines || getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+        saveTrendlinesForSymbol(currentSymbol, currentTimeframe, dataToSave);
         drawTrendlinesOnChart(); // CRITICAL: Rebuild hit test map with new coordinates
         updateLineHandles();
         evaluateCurrentSignals();
