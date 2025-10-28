@@ -2978,19 +2978,6 @@
     // Canvas overlay system disabled - LineSeries handles all drawing
     console.log('[EOD] ✅ Drawing system ready (using LineSeries, no canvas overlay needed)');
     return;
-      
-      if (typeof initializeDrawingOverlay === 'function') {
-        // Load stored drawings first
-        loadOverlayDrawingsFromStorage();
-        
-        // Initialize overlay system
-        initializeDrawingOverlay();
-        setupOverlayEventHandling();
-        console.log('[EOD] ✅ Overlay system initialized successfully');
-      }
-    } catch (error) {
-      console.error('[EOD] ❌ Overlay initialization failed:', error);
-    }
   }
   
   setTimeout(() => attemptOverlayInitialization(), 200);
