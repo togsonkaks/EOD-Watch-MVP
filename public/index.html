@@ -5819,64 +5819,64 @@
     
     console.log('[EOD] 🔗 Setting up comprehensive chart event synchronization');
     
-    // 1. TimeScale changes (zoom/pan/scroll)
-    chart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {
-      console.log('[EOD] 📊 TimeScale changed - triggering overlay sync');
-      
-      // Update line handles if line is selected
-      if (selectedLine && selectedLine.type === 'trendline') {
-        updateLineHandles();
-      }
-      
-      // Critical: Redraw overlay to maintain coordinate synchronization
-      renderOverlay();
-      
-      // Validate coordinate accuracy
-      validateCoordinateAccuracy();
-    });
+    // 1. TimeScale changes (zoom/pan/scroll) - DISABLED TO STOP FLICKERING
+    // chart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {
+    //   console.log('[EOD] 📊 TimeScale changed - triggering overlay sync');
+    //   
+    //   // Update line handles if line is selected
+    //   if (selectedLine && selectedLine.type === 'trendline') {
+    //     updateLineHandles();
+    //   }
+    //   
+    //   // Critical: Redraw overlay to maintain coordinate synchronization
+    //   renderOverlay();
+    //   
+    //   // Validate coordinate accuracy
+    //   validateCoordinateAccuracy();
+    // });
     
-    // 2. TimeScale logical range changes (includes all transformations)
-    chart.timeScale().subscribeVisibleLogicalRangeChange((logicalRange) => {
-      console.log('[EOD] 📊 Logical range changed - triggering overlay sync', logicalRange);
-      renderOverlay();
-    });
+    // 2. TimeScale logical range changes (includes all transformations) - DISABLED TO STOP FLICKERING
+    // chart.timeScale().subscribeVisibleLogicalRangeChange((logicalRange) => {
+    //   console.log('[EOD] 📊 Logical range changed - triggering overlay sync', logicalRange);
+    //   renderOverlay();
+    // });
     
-    // 3. PriceScale changes (vertical zoom/pan) - Using chart priceScale API
-    try {
-      const priceScale = chart.priceScale('right');
-      if (priceScale && typeof priceScale.subscribeVisiblePriceRangeChange === 'function') {
-        priceScale.subscribeVisiblePriceRangeChange((priceRange) => {
-          console.log('[EOD] 📊 PriceScale changed - triggering overlay sync');
-          renderOverlay();
-          validateCoordinateAccuracy();
-        });
-      } else {
-        console.log('[EOD] ℹ️ PriceScale range change subscription not available in this chart version');
-      }
-    } catch (error) {
-      console.log('[EOD] ℹ️ PriceScale subscription not supported, using alternative approach');
-    }
+    // 3. PriceScale changes (vertical zoom/pan) - DISABLED TO STOP FLICKERING
+    // try {
+    //   const priceScale = chart.priceScale('right');
+    //   if (priceScale && typeof priceScale.subscribeVisiblePriceRangeChange === 'function') {
+    //     priceScale.subscribeVisiblePriceRangeChange((priceRange) => {
+    //       console.log('[EOD] 📊 PriceScale changed - triggering overlay sync');
+    //       renderOverlay();
+    //       validateCoordinateAccuracy();
+    //     });
+    //   } else {
+    //     console.log('[EOD] ℹ️ PriceScale range change subscription not available in this chart version');
+    //   }
+    // } catch (error) {
+    //   console.log('[EOD] ℹ️ PriceScale subscription not supported, using alternative approach');
+    // }
     
-    // 4. Chart size changes (handled by ResizeObserver but also add redundancy)
-    const chartContainer = document.getElementById('chart');
-    if (chartContainer) {
-      const resizeObserver = new ResizeObserver(entries => {
-        console.log('[EOD] 📊 Chart container resized - triggering full overlay sync');
-        
-        // Delay to ensure chart has finished resizing
-        setTimeout(() => {
-          syncOverlayCanvasDimensions();
-          renderOverlay();
-          validateCoordinateAccuracy();
-        }, 50);
-      });
-      resizeObserver.observe(chartContainer);
-    }
+    // 4. Chart size changes (handled by ResizeObserver but also add redundancy) - DISABLED TO STOP FLICKERING
+    // const chartContainer = document.getElementById('chart');
+    // if (chartContainer) {
+    //   const resizeObserver = new ResizeObserver(entries => {
+    //     console.log('[EOD] 📊 Chart container resized - triggering full overlay sync');
+    //     
+    //     // Delay to ensure chart has finished resizing
+    //     setTimeout(() => {
+    //       syncOverlayCanvasDimensions();
+    //       renderOverlay();
+    //       validateCoordinateAccuracy();
+    //     }, 50);
+    //   });
+    //   resizeObserver.observe(chartContainer);
+    // }
     
-    // 5. Setup periodic coordinate drift detection
-    setInterval(() => {
-      validateCoordinateAccuracy();
-    }, 5000); // Check every 5 seconds
+    // 5. Setup periodic coordinate drift detection - DISABLED TO STOP FLICKERING
+    // setInterval(() => {
+    //   validateCoordinateAccuracy();
+    // }, 5000); // Check every 5 seconds
     
     console.log('[EOD] ✅ Chart event synchronization setup complete');
   }
