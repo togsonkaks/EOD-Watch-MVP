@@ -1954,6 +1954,10 @@
         }
         
         chartContainer.style.cursor = unifiedDragState.dragMode === 'trendline-move' ? 'grab' : 'nw-resize';
+        
+        // CRITICAL: Freeze chart IMMEDIATELY to prevent any panning
+        freezeDuringDrag(true);
+        
         console.log('[EOD] ✅ Trendline drag setup:', unifiedDragState.dragMode);
         e.preventDefault();
         e.stopPropagation();
@@ -1979,6 +1983,10 @@
         }
         
         chartContainer.style.cursor = 'ns-resize';
+        
+        // CRITICAL: Freeze chart IMMEDIATELY to prevent any panning
+        freezeDuringDrag(true);
+        
         console.log('[EOD] ✅ Level drag setup');
         e.preventDefault();
         e.stopPropagation();
@@ -2110,19 +2118,24 @@
     if (levelIndex >= 0 && levels[levelIndex].price !== unifiedDragState.currentPrice) {
       levels[levelIndex].price = unifiedDragState.currentPrice;
       
-      // Update visual representation
+      // Update visual representation IN-PLACE (no rebuild during drag)
       const rec = levelLineById.get(unifiedDragState.dragTarget.id);
       if (rec) {
-        try { candleSeries.removePriceLine(rec.line); } catch {}
-        const line = candleSeries.createPriceLine({
-          price: unifiedDragState.currentPrice,
-          color: levels[levelIndex].selected ? '#22d3ee' : (levels[levelIndex].color || '#60a5fa'),
-          lineWidth: levels[levelIndex].selected ? 5 : 2,
-          lineStyle: 0, 
-          axisLabelVisible: true, 
-          title: `Level ${unifiedDragState.currentPrice.toFixed(2)}`
-        });
-        levelLineById.set(unifiedDragState.dragTarget.id, { line, data: levels[levelIndex] });
+        try { 
+          candleSeries.removePriceLine(rec.line); 
+          const line = candleSeries.createPriceLine({
+            price: unifiedDragState.currentPrice,
+            color: levels[levelIndex].selected ? '#22d3ee' : (levels[levelIndex].color || '#60a5fa'),
+            lineWidth: levels[levelIndex].selected ? 5 : 2,
+            lineStyle: 0, 
+            axisLabelVisible: true, 
+            title: `Level ${unifiedDragState.currentPrice.toFixed(2)}`
+          });
+          rec.line = line;
+          rec.data = levels[levelIndex];
+        } catch (e) {
+          console.warn('[EOD] ⚠️ Level update error:', e);
+        }
       }
     }
   }
@@ -2210,22 +2223,14 @@
       }
     }
     
-    // Update visual representation
+    // Update visual representation IN-PLACE (no rebuild during drag)
     if (trendlineData) {
       const rec = trendSeriesById.get(unifiedDragState.dragTarget.id);
-      if (rec) {
-        try { chart.removeSeries(rec.series); } catch {}
-        
-        const newSeries = chart.addLineSeries({
-          color: trendline.color,
-          lineWidth: 2,
-          lineStyle: trendline.style || 0,
-          priceLineVisible: false,
-          lastValueVisible: false
-        });
-        
-        newSeries.setData(trendlineData);
-        trendSeriesById.set(unifiedDragState.dragTarget.id, { series: newSeries, data: trendline });
+      if (rec && rec.series) {
+        // Just update the data on existing series - NO remove/recreate!
+        rec.series.setData(trendlineData);
+        // Update stored data reference
+        rec.data = trendline;
       }
     }
   }
