@@ -2340,7 +2340,13 @@
       } else if (unifiedDragState.dragType === 'trendline') {
         // CRITICAL: Save the MODIFIED array, not the original from storage
         const dataToSave = unifiedDragState.modifiedTrendlines || getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+        console.log('[EOD] 🔍 Saving trendlines:', dataToSave?.length, 'trendlines, first:', dataToSave?.[0]);
         saveTrendlinesForSymbol(currentSymbol, currentTimeframe, dataToSave);
+        
+        // Verify save worked
+        const reloaded = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
+        console.log('[EOD] 🔍 Reloaded after save:', reloaded?.length, 'trendlines, first:', reloaded?.[0]);
+        
         drawTrendlinesOnChart(); // CRITICAL: Rebuild hit test map with new coordinates
         updateLineHandles();
         evaluateCurrentSignals();
