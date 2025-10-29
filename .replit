@@ -51,9 +51,13 @@ localPort = 42323
 externalPort = 3001
 
 [[ports]]
+localPort = 46677
+externalPort = 5000
+
+[[ports]]
 localPort = 46877
 externalPort = 4200
 
 [deployment]
-deploymentTarget = "vm"
-run = ["npm", "start"]
+deploymentTarget = "autoscale"
+run = ["sh", "-c", "echo 'Static files served from public directory'"]

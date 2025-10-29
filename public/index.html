@@ -597,6 +597,49 @@
   const $$ = s => document.querySelectorAll(s);
   const log = m => { $('#log').textContent = m; console.log('[EOD]', m); };
 
+  // ==== EMBEDDED SAMPLE DATA FOR STATIC DEMO ====
+  // This data is used as fallback when backend is unavailable (static deployment)
+  // After approval, switch back to VM deployment with server.js for live data
+  
+  function generateSampleStockData() {
+    // Generate 1 year of realistic AAPL-like stock data (252 trading days)
+    const bars = [];
+    const startDate = new Date('2024-01-02');
+    const basePrice = 180;
+    let currentPrice = basePrice;
+    
+    for (let i = 0; i < 365; i++) {
+      const date = new Date(startDate);
+      date.setDate(startDate.getDate() + i);
+      
+      // Skip weekends
+      if (date.getDay() === 0 || date.getDay() === 6) continue;
+      
+      // Generate realistic daily bar
+      const volatility = 0.02; // 2% daily volatility
+      const trend = 0.001; // slight upward trend
+      const change = (Math.random() - 0.48) * volatility + trend;
+      
+      currentPrice = currentPrice * (1 + change);
+      const open = currentPrice * (1 + (Math.random() - 0.5) * 0.005);
+      const high = Math.max(open, currentPrice) * (1 + Math.random() * 0.01);
+      const low = Math.min(open, currentPrice) * (1 - Math.random() * 0.01);
+      const close = currentPrice;
+      
+      bars.push({
+        time: Math.floor(date.getTime() / 1000),
+        open: parseFloat(open.toFixed(2)),
+        high: parseFloat(high.toFixed(2)),
+        low: parseFloat(low.toFixed(2)),
+        close: parseFloat(close.toFixed(2))
+      });
+    }
+    
+    return bars;
+  }
+  
+  const EMBEDDED_SAMPLE_DATA = generateSampleStockData();
+
   // ---- Application State with safe migration
   // One-time migration cleanup (only run once to prevent data loss)
   const migrationVersion = localStorage.getItem('eod-migration-version');
@@ -4244,14 +4287,25 @@
   }
 
   async function fetchBars(symbol, days = 4000) {
-    const url = `${API}/eod?symbol=${encodeURIComponent(symbol)}&days=${days}`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const json = await r.json();
-    // Tiingo adapter -> Lightweight Charts
-    return (json.data || []).map(b => ({
-      time: b.time, open: b.open, high: b.high, low: b.low, close: b.close
-    }));
+    // Try backend first, fall back to embedded data for static demo
+    try {
+      const url = `${API}/eod?symbol=${encodeURIComponent(symbol)}&days=${days}`;
+      const r = await fetch(url);
+      if (!r.ok) {
+        console.log('[EOD] Backend unavailable, using embedded sample data');
+        return EMBEDDED_SAMPLE_DATA;
+      }
+      const json = await r.json();
+      log('Backend OK');
+      // Tiingo adapter -> Lightweight Charts
+      return (json.data || []).map(b => ({
+        time: b.time, open: b.open, high: b.high, low: b.low, close: b.close
+      }));
+    } catch (error) {
+      // Backend not available (static deployment), use embedded data
+      console.log('[EOD] Using embedded sample data (static mode)');
+      return EMBEDDED_SAMPLE_DATA;
+    }
   }
 
   // Helper functions for per-timeframe storage (for legacy chart-based drawings)
