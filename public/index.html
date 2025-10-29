@@ -4918,7 +4918,6 @@
       }
       
       // Check distance to start point
-      console.log("[DRAW] Handle hit test - start dist:", startDistance.toFixed(2), "end dist:", endDistance.toFixed(2), "tolerance:", tolerance);
       const startDistance = Math.sqrt(Math.pow(clickX - startX, 2) + Math.pow(clickY - startY, 2));
       if (startDistance <= tolerance) {
         return 'start';
@@ -4926,6 +4925,7 @@
       
       // Check distance to end point
       const endDistance = Math.sqrt(Math.pow(clickX - endX, 2) + Math.pow(clickY - endY, 2));
+      console.log("[DRAW] Handle distances - start:", startDistance.toFixed(2), "end:", endDistance.toFixed(2), "tolerance:", tolerance);
       if (endDistance <= tolerance) {
         return 'end';
       }
