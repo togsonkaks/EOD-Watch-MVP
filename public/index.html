@@ -398,13 +398,10 @@
       position: absolute;
       top: 0;
       left: 0;
-      pointer-events: none; /* Default: allow chart interaction */
+      pointer-events: all; /* Always accept clicks for selection and dragging */
       z-index: 10;
     }
     
-    #drawing-canvas.drawing-active {
-      pointer-events: all; /* Enable when drawing */
-    }
     
     #chart {
       position: relative;
