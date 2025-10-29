@@ -4656,6 +4656,7 @@
   
   function onCanvasMouseDown(e) {
     if (!drawingMode) return;
+    console.log("[DRAW] Mouse down event - mode:", drawingMode, "currentDrawing:", !!currentDrawing);
     
     const rect = drawingCanvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -4685,6 +4686,7 @@
         currentDrawing = { start: {x, y}, end: {x, y} };
         console.log('[DRAW] Trendline started');
       } else {
+        console.log("[DRAW] Second click path executing");
         // Second click: finalize line
         const aTime = chart.timeScale().coordinateToTime(currentDrawing.start.x);
         const aPrice = candleSeries.coordinateToPrice(currentDrawing.start.y);
