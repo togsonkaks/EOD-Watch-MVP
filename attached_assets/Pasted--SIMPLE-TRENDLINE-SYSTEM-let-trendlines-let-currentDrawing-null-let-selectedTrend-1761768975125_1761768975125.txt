@@ -1,0 +1,322 @@
+// === SIMPLE TRENDLINE SYSTEM ===
+let trendlines = [];
+let currentDrawing = null;
+let selectedTrendline = null;
+let dragHandle = null;
+
+function initSimpleTrendlines() {
+    const chartContainer = document.getElementById('chart');
+    
+    // Load existing trendlines
+    loadTrendlines();
+    
+    // Setup event listeners
+    chartContainer.addEventListener('mousedown', onChartMouseDown);
+    chartContainer.addEventListener('mousemove', onChartMouseMove);
+    chartContainer.addEventListener('mouseup', onChartMouseUp);
+    chartContainer.addEventListener('contextmenu', onChartRightClick);
+    
+    console.log('✅ Simple trendline system ready');
+}
+
+function onChartMouseDown(e) {
+    if (e.button !== 0) return; // Only left click
+    
+    const { x, y, time, price } = getChartCoordinates(e);
+    if (!time || !price) return;
+    
+    // Check if clicking on existing trendline handle
+    const clickedHandle = findTrendlineHandle(x, y);
+    if (clickedHandle) {
+        startDragging(clickedHandle.trendline, clickedHandle.type);
+        return;
+    }
+    
+    // Check if clicking on trendline body
+    const clickedTrendline = findTrendlineAt(x, y);
+    if (clickedTrendline) {
+        selectTrendline(clickedTrendline);
+        return;
+    }
+    
+    // Start drawing new trendline
+    if (document.getElementById('toolTrend').classList.contains('active')) {
+        startDrawingTrendline(time, price);
+    }
+}
+
+function onChartMouseMove(e) {
+    const { x, y, time, price } = getChartCoordinates(e);
+    
+    if (currentDrawing) {
+        // Update preview line
+        updateDrawingPreview(time, price);
+    } else if (dragHandle) {
+        // Update dragging
+        updateDragging(time, price);
+    }
+}
+
+function onChartMouseUp(e) {
+    const { time, price } = getChartCoordinates(e);
+    
+    if (currentDrawing) {
+        finishDrawingTrendline(time, price);
+    } else if (dragHandle) {
+        finishDragging();
+    }
+}
+
+function onChartRightClick(e) {
+    e.preventDefault();
+    const { x, y } = getChartCoordinates(e);
+    
+    const trendline = findTrendlineAt(x, y);
+    if (trendline) {
+        showTrendlineContextMenu(e.clientX, e.clientY, trendline);
+    }
+}
+
+// === CORE TRENDLINE FUNCTIONS ===
+function startDrawingTrendline(startTime, startPrice) {
+    currentDrawing = {
+        startTime,
+        startPrice,
+        previewLine: chart.addLineSeries({ color: '#f59e0b', lineWidth: 2, lineStyle: 2 })
+    };
+    
+    currentDrawing.previewLine.setData([
+        { time: startTime, value: startPrice },
+        { time: startTime, value: startPrice }
+    ]);
+}
+
+function updateDrawingPreview(time, price) {
+    if (!currentDrawing) return;
+    
+    currentDrawing.previewLine.setData([
+        { time: currentDrawing.startTime, value: currentDrawing.startPrice },
+        { time: time, value: price }
+    ]);
+}
+
+function finishDrawingTrendline(endTime, endPrice) {
+    if (!currentDrawing) return;
+    
+    // Remove preview
+    chart.removeSeries(currentDrawing.previewLine);
+    
+    // Create final trendline
+    const trendline = {
+        id: 'trendline_' + Date.now(),
+        startTime: currentDrawing.startTime,
+        startPrice: currentDrawing.startPrice,
+        endTime: endTime,
+        endPrice: endPrice,
+        color: '#f59e0b',
+        lineSeries: chart.addLineSeries({ color: '#f59e0b', lineWidth: 2 })
+    };
+    
+    trendline.lineSeries.setData([
+        { time: trendline.startTime, value: trendline.startPrice },
+        { time: trendline.endTime, value: trendline.endPrice }
+    ]);
+    
+    trendlines.push(trendline);
+    saveTrendlines();
+    
+    currentDrawing = null;
+    document.getElementById('toolTrend').classList.remove('active');
+    
+    console.log('✅ Trendline created');
+}
+
+// === DRAGGING ===
+function startDragging(trendline, handleType) {
+    dragHandle = { trendline, handleType };
+    document.body.style.cursor = 'grabbing';
+}
+
+function updateDragging(time, price) {
+    if (!dragHandle) return;
+    
+    const { trendline, handleType } = dragHandle;
+    
+    if (handleType === 'start') {
+        trendline.startTime = time;
+        trendline.startPrice = price;
+    } else if (handleType === 'end') {
+        trendline.endTime = time;
+        trendline.endPrice = price;
+    } else if (handleType === 'move') {
+        // Move entire trendline (you'd need to calculate delta)
+    }
+    
+    // Update visual
+    trendline.lineSeries.setData([
+        { time: trendline.startTime, value: trendline.startPrice },
+        { time: trendline.endTime, value: trendline.endPrice }
+    ]);
+}
+
+function finishDragging() {
+    if (dragHandle) {
+        saveTrendlines();
+        dragHandle = null;
+        document.body.style.cursor = '';
+    }
+}
+
+// === UTILITIES ===
+function getChartCoordinates(e) {
+    const rect = document.getElementById('chart').getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    try {
+        const time = chart.timeScale().coordinateToTime(x);
+        const price = candleSeries.coordinateToPrice(y);
+        return { x, y, time, price };
+    } catch (error) {
+        return { x, y, time: null, price: null };
+    }
+}
+
+function findTrendlineAt(x, y, tolerance = 10) {
+    for (const trendline of trendlines) {
+        const startX = chart.timeScale().timeToCoordinate(trendline.startTime);
+        const startY = candleSeries.priceToCoordinate(trendline.startPrice);
+        const endX = chart.timeScale().timeToCoordinate(trendline.endTime);
+        const endY = candleSeries.priceToCoordinate(trendline.endPrice);
+        
+        if (!startX || !startY || !endX || !endY) continue;
+        
+        const distance = pointToLineDistance(x, y, startX, startY, endX, endY);
+        if (distance <= tolerance) {
+            return trendline;
+        }
+    }
+    return null;
+}
+
+function findTrendlineHandle(x, y, tolerance = 8) {
+    for (const trendline of trendlines) {
+        const startX = chart.timeScale().timeToCoordinate(trendline.startTime);
+        const startY = candleSeries.priceToCoordinate(trendline.startPrice);
+        const endX = chart.timeScale().timeToCoordinate(trendline.endTime);
+        const endY = candleSeries.priceToCoordinate(trendline.endPrice);
+        
+        // Check start handle
+        if (Math.abs(x - startX) <= tolerance && Math.abs(y - startY) <= tolerance) {
+            return { trendline, type: 'start' };
+        }
+        
+        // Check end handle
+        if (Math.abs(x - endX) <= tolerance && Math.abs(y - endY) <= tolerance) {
+            return { trendline, type: 'end' };
+        }
+    }
+    return null;
+}
+
+function pointToLineDistance(px, py, x1, y1, x2, y2) {
+    const A = px - x1;
+    const B = py - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+    
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = 0;
+    
+    if (lenSq !== 0) param = dot / lenSq;
+    
+    let xx, yy;
+    
+    if (param < 0) {
+        xx = x1;
+        yy = y1;
+    } else if (param > 1) {
+        xx = x2;
+        yy = y2;
+    } else {
+        xx = x1 + param * C;
+        yy = y1 + param * D;
+    }
+    
+    const dx = px - xx;
+    const dy = py - yy;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+// === PERSISTENCE ===
+function saveTrendlines() {
+    const data = trendlines.map(t => ({
+        id: t.id,
+        startTime: t.startTime,
+        startPrice: t.startPrice,
+        endTime: t.endTime,
+        endPrice: t.endPrice,
+        color: t.color
+    }));
+    
+    const key = `trendlines_${currentSymbol}_${currentTimeframe}`;
+    localStorage.setItem(key, JSON.stringify(data));
+}
+
+function loadTrendlines() {
+    const key = `trendlines_${currentSymbol}_${currentTimeframe}`;
+    const data = JSON.parse(localStorage.getItem(key) || '[]');
+    
+    trendlines = data.map(item => {
+        const lineSeries = chart.addLineSeries({ 
+            color: item.color || '#f59e0b', 
+            lineWidth: 2 
+        });
+        
+        lineSeries.setData([
+            { time: item.startTime, value: item.startPrice },
+            { time: item.endTime, value: item.endPrice }
+        ]);
+        
+        return { ...item, lineSeries };
+    });
+}
+
+// === CONTEXT MENU ===
+function showTrendlineContextMenu(x, y, trendline) {
+    // Simple context menu for alerts, deletion, etc.
+    const menu = document.createElement('div');
+    menu.style.cssText = `
+        position: fixed;
+        left: ${x}px;
+        top: ${y}px;
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        padding: 8px 0;
+        z-index: 1000;
+        min-width: 150px;
+    `;
+    
+    menu.innerHTML = `
+        <div class="menu-item" onclick="addTrendlineAlert('${trendline.id}')">🔔 Add Alert</div>
+        <div class="menu-item" onclick="extendTrendline('${trendline.id}')">📏 Extend</div>
+        <div class="menu-item" style="color: #ef4444;" onclick="deleteTrendline('${trendline.id}')">🗑️ Delete</div>
+    `;
+    
+    document.body.appendChild(menu);
+    
+    // Remove menu on click elsewhere
+    setTimeout(() => {
+        document.addEventListener('click', function removeMenu() {
+            document.body.removeChild(menu);
+            document.removeEventListener('click', removeMenu);
+        }, { once: true });
+    }, 100);
+}
+
+// Initialize when chart is ready
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(initSimpleTrendlines, 1000);
+});
