@@ -4566,6 +4566,8 @@
   let drawnLines = []; // {aTime, aPrice, bTime, bPrice, type: 'trendline'|'level'}
   let currentDrawing = null; // {start: {x,y}, end: {x,y}} for preview
   let drawingMode = null; // 'level' or 'trendline'
+  let selectedLine = null; // Currently selected line for interaction
+  let dragState = null; // {lineIndex, handleType: 'start'|'end'|'body'}
   
   function initDrawingCanvas() {
     const chartContainer = document.getElementById('chart');
@@ -4610,7 +4612,10 @@
     drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
     
     // Draw all saved lines
-    for (const line of drawnLines) {
+    for (let i = 0; i < drawnLines.length; i++) {
+      const line = drawnLines[i];
+      const isSelected = (selectedLine === i);
+      
       if (line.type === 'trendline') {
         const ax = chart.timeScale().timeToCoordinate(line.aTime);
         const ay = candleSeries.priceToCoordinate(line.aPrice);
@@ -4620,12 +4625,28 @@
         // Explicit null/undefined checks (allow coordinate 0)
         if (ax !== null && ax !== undefined && ay !== null && ay !== undefined &&
             bx !== null && bx !== undefined && by !== null && by !== undefined) {
+          // Draw the line
           drawingCtx.beginPath();
           drawingCtx.moveTo(ax, ay);
           drawingCtx.lineTo(bx, by);
-          drawingCtx.strokeStyle = line.color || 'rgba(245,158,11,0.9)';
-          drawingCtx.lineWidth = 2;
+          drawingCtx.strokeStyle = isSelected ? '#60a5fa' : (line.color || 'rgba(245,158,11,0.9)');
+          drawingCtx.lineWidth = isSelected ? 3 : 2;
           drawingCtx.stroke();
+          
+          // Draw handles if selected
+          if (isSelected) {
+            drawingCtx.fillStyle = '#3b82f6';
+            
+            // Start point handle
+            drawingCtx.beginPath();
+            drawingCtx.arc(ax, ay, 6, 0, 2 * Math.PI);
+            drawingCtx.fill();
+            
+            // End point handle
+            drawingCtx.beginPath();
+            drawingCtx.arc(bx, by, 6, 0, 2 * Math.PI);
+            drawingCtx.fill();
+          }
         }
       } else if (line.type === 'level') {
         const y = candleSeries.priceToCoordinate(line.price);
@@ -4655,12 +4676,48 @@
   }
   
   function onCanvasMouseDown(e) {
-    if (!drawingMode) return;
-    console.log("[DRAW] Mouse down event - mode:", drawingMode, "currentDrawing:", !!currentDrawing);
-    
     const rect = drawingCanvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    
+    // INTERACTIVE FEATURES: Handle selection and drag BEFORE drawing mode
+    if (!drawingMode) {
+      // Check if clicking on a trendline handle
+      for (let i = 0; i < drawnLines.length; i++) {
+        const line = drawnLines[i];
+        if (line.type === 'trendline') {
+          const handleType = checkEndpointHit(x, y, line);
+          if (handleType) {
+            // Start dragging a handle
+            dragState = { lineIndex: i, handleType: handleType };
+            console.log('[DRAW] 🎯 Started dragging', handleType, 'handle of line', i);
+            return;
+          }
+        }
+      }
+      
+      // Check if clicking on a trendline body (for selection)
+      for (let i = 0; i < drawnLines.length; i++) {
+        const line = drawnLines[i];
+        if (isClickOnTrendline(x, y, line)) {
+          selectedLine = i;
+          console.log('[DRAW] ✅ Selected line', i);
+          redrawAllLines();
+          return;
+        }
+      }
+      
+      // Click on empty space - deselect
+      if (selectedLine !== null) {
+        selectedLine = null;
+        console.log('[DRAW] Deselected line');
+        redrawAllLines();
+      }
+      return;
+    }
+    
+    // EXISTING DRAWING MODE LOGIC
+    console.log("[DRAW] Mouse down event - mode:", drawingMode, "currentDrawing:", !!currentDrawing);
     
     if (drawingMode === 'level') {
       // Single click creates horizontal level
@@ -4678,7 +4735,6 @@
         document.body.classList.remove('drawing-mode');
         drawingCanvas.classList.remove('drawing-active');
         document.getElementById('toolLevel').classList.remove('active');
-        console.log('[DRAW] ✅ Level added at', price.toFixed(2));
       }
     } else if (drawingMode === 'trendline') {
       if (!currentDrawing) {
@@ -4716,8 +4772,35 @@
   }
   
   function onCanvasMouseMove(e) {
+    const rect = drawingCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // Handle dragging if active
+    if (dragState) {
+      const line = drawnLines[dragState.lineIndex];
+      if (line && line.type === 'trendline') {
+        const newTime = chart.timeScale().coordinateToTime(x);
+        const newPrice = candleSeries.coordinateToPrice(y);
+        
+        if (newTime !== null && newTime !== undefined && newPrice !== null && newPrice !== undefined &&
+            isFinite(newTime) && isFinite(newPrice)) {
+          // Update the appropriate endpoint
+          if (dragState.handleType === 'start') {
+            line.aTime = newTime;
+            line.aPrice = newPrice;
+          } else if (dragState.handleType === 'end') {
+            line.bTime = newTime;
+            line.bPrice = newPrice;
+          }
+          redrawAllLines();
+        }
+      }
+      return;
+    }
+    
+    // Handle preview drawing (existing logic)
     if (currentDrawing) {
-      const rect = drawingCanvas.getBoundingClientRect();
       currentDrawing.end = { 
         x: e.clientX - rect.left, 
         y: e.clientY - rect.top 
@@ -4727,7 +4810,13 @@
   }
   
   function onCanvasMouseUp(e) {
-    // Currently not needed, but available for drag functionality later
+    // Finalize dragging
+    if (dragState) {
+      console.log('[DRAW] ✅ Finished dragging, saving changes');
+      saveDrawings();
+      dragState = null;
+      redrawAllLines();
+    }
   }
   
   function saveDrawings() {
@@ -4759,6 +4848,53 @@
     console.log('[DRAW] All drawings cleared');
   }
 
+
+  // Helper function to check if click is on a trendline body
+  function isClickOnTrendline(x, y, line, tolerance = 8) {
+    if (!line || line.type !== 'trendline') return false;
+    
+    try {
+      // Convert line endpoints to screen coordinates
+      const ax = chart.timeScale().timeToCoordinate(line.aTime);
+      const ay = candleSeries.priceToCoordinate(line.aPrice);
+      const bx = chart.timeScale().timeToCoordinate(line.bTime);
+      const by = candleSeries.priceToCoordinate(line.bPrice);
+      
+      // Null safety check
+      if (ax === null || ay === null || bx === null || by === null ||
+          !Number.isFinite(ax) || !Number.isFinite(ay) || 
+          !Number.isFinite(bx) || !Number.isFinite(by)) {
+        return false;
+      }
+      
+      // Calculate distance from point to line segment
+      const dx = bx - ax;
+      const dy = by - ay;
+      const lenSq = dx * dx + dy * dy;
+      
+      if (lenSq === 0) {
+        // Line is a point
+        const dist = Math.sqrt(Math.pow(x - ax, 2) + Math.pow(y - ay, 2));
+        return dist <= tolerance;
+      }
+      
+      // Calculate projection parameter
+      let t = ((x - ax) * dx + (y - ay) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      
+      // Find closest point on line segment
+      const projX = ax + t * dx;
+      const projY = ay + t * dy;
+      
+      // Calculate distance to closest point
+      const distance = Math.sqrt(Math.pow(x - projX, 2) + Math.pow(y - projY, 2));
+      
+      return distance <= tolerance;
+    } catch (error) {
+      console.warn('[DRAW] Error in isClickOnTrendline:', error);
+      return false;
+    }
+  }
   // Check if click is near a trendline endpoint for resizing
   function checkEndpointHit(clickX, clickY, trendlineData, tolerance = 12) {
     if (!trendlineData || !trendlineData.startTime || !trendlineData.endTime) return null;
@@ -5208,33 +5344,33 @@
   }
 
   // Drag functionality for handles
-  let dragState = { isDragging: false, handleElement: null, isStart: false, isMiddle: false, lineType: null, originalStart: null, originalEnd: null, startMouseTime: null, startMousePrice: null };
+  let legacyDragState = { isDragging: false, handleElement: null, isStart: false, isMiddle: false, lineType: null, originalStart: null, originalEnd: null, startMouseTime: null, startMousePrice: null };
 
   document.addEventListener('mousedown', (event) => {
     const handle = event.target.closest('.line-handle');
     if (handle) {
       event.preventDefault();
-      dragState.isDragging = true;
-      dragState.handleElement = handle;
-      dragState.isStart = handle.dataset.handleType === 'start';
-      dragState.lineType = handle.dataset.lineType;
-      handle.style.cursor = dragState.lineType === 'level' ? 'ns-resize' : 'grabbing';
+      legacyDragState.isDragging = true;
+      legacyDragState.handleElement = handle;
+      legacyDragState.isStart = handle.dataset.handleType === 'start';
+      legacyDragState.lineType = handle.dataset.lineType;
+      handle.style.cursor = legacyDragState.lineType === 'level' ? 'ns-resize' : 'grabbing';
     }
   });
 
   document.addEventListener('mousemove', (event) => {
-    if (dragState.isDragging && dragState.handleElement) {
+    if (legacyDragState.isDragging && legacyDragState.handleElement) {
       const chartContainer = document.getElementById('chart');
       const rect = chartContainer.getBoundingClientRect();
       const newX = event.clientX - rect.left;
       const newY = event.clientY - rect.top;
       
       // Update handle position
-      dragState.handleElement.style.left = (newX - 6) + 'px';
-      dragState.handleElement.style.top = (newY - 6) + 'px';
+      legacyDragState.handleElement.style.left = (newX - 6) + 'px';
+      legacyDragState.handleElement.style.top = (newY - 6) + 'px';
       
       // Update the actual line data with REAL-TIME visual feedback
-      if (dragState.lineType === 'trendline') {
+      if (legacyDragState.lineType === 'trendline') {
         // Handle trendline drag (both horizontal and vertical movement)
         
         // Add comprehensive validation to prevent chart crashes
@@ -5262,7 +5398,7 @@
             let endTime = currentTrendline.endTime;
             let endPrice = currentTrendline.endPrice;
             
-            if (dragState.isStart) {
+            if (legacyDragState.isStart) {
               startTime = newTime;
               startPrice = newPrice;
             } else {
@@ -5294,7 +5430,7 @@
           }
         }
         
-      } else if (dragState.lineType === 'level') {
+      } else if (legacyDragState.lineType === 'level') {
         // Handle horizontal level drag (vertical movement only)
         
         // Add comprehensive validation to prevent chart crashes
@@ -5331,14 +5467,14 @@
   });
 
   document.addEventListener('mouseup', (event) => {
-    if (dragState.isDragging) {
+    if (legacyDragState.isDragging) {
       const chartContainer = document.getElementById('chart');
       const rect = chartContainer.getBoundingClientRect();
       const newX = event.clientX - rect.left;
       const newY = event.clientY - rect.top;
       
       // Final confirmation (real-time updates happen during mousemove)
-      if (dragState.lineType === 'trendline') {
+      if (legacyDragState.lineType === 'trendline') {
         const newTime = chart.timeScale().coordinateToTime(newX);
         const newPrice = candleSeries.coordinateToPrice(newY);
         
@@ -5348,7 +5484,7 @@
           log('⚠️ Drag position out of bounds - trendline not moved');
         }
         
-      } else if (dragState.lineType === 'level') {
+      } else if (legacyDragState.lineType === 'level') {
         const newPrice = candleSeries.coordinateToPrice(newY);
         
         if (newPrice !== null && !isNaN(newPrice)) {
@@ -5360,8 +5496,8 @@
     }
     
     // Reset drag state and cursor
-    if (dragState.handleElement && dragState.handleElement.parentNode) {
-      dragState.handleElement.style.cursor = dragState.lineType === 'level' ? 'ns-resize' : 'grab';
+    if (legacyDragState.handleElement && legacyDragState.handleElement.parentNode) {
+      legacyDragState.handleElement.style.cursor = legacyDragState.lineType === 'level' ? 'ns-resize' : 'grab';
     }
     dragState = { isDragging: false, handleElement: null, isStart: false, isMiddle: false, lineType: null, originalStart: null, originalEnd: null, startMouseTime: null, startMousePrice: null };
   });
