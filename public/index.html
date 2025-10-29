@@ -393,6 +393,23 @@
       cursor: not-allowed;
     }
 
+    /* Canvas Overlay for Drawing Tools */
+    #drawing-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none; /* Default: allow chart interaction */
+      z-index: 10;
+    }
+    
+    #drawing-canvas.drawing-active {
+      pointer-events: all; /* Enable when drawing */
+    }
+    
+    #chart {
+      position: relative;
+    }
+
     /* Responsive */
     @media (max-width: 1200px) {
       main { grid-template-columns:1fr 280px; }
@@ -459,8 +476,6 @@
       <div class="loading-overlay" id="loading-overlay">
         <div>Loading chart data...</div>
       </div>
-      <!-- ISOLATED DRAWING OVERLAY - Completely independent from chart series -->
-      <!-- Canvas overlay removed - using LineSeries for trendlines instead -->
     </section>
 
     <!-- side panel -->
@@ -2620,6 +2635,7 @@
   // Set up chart events now that chart is fully initialized
   setupChartEventSynchronization();
   setupChartInteraction();
+  initDrawingCanvas();
   
   // Force resize to ensure proper rendering
   setTimeout(() => {
@@ -4440,6 +4456,12 @@
       updateTimeframeDisplay();
       updateWatchlistDisplay();
       updateMiniChartActiveState(); // Update active mini-chart highlighting
+      
+      // Load drawings for new symbol/timeframe
+      if (typeof loadDrawings === 'function') {
+        loadDrawings();
+      }
+      
       updateLevelsDisplay();
       drawLevelsOnChart();
       updateTrendlinesDisplay();
@@ -5224,6 +5246,206 @@
     });
 
     console.log('[EOD] ✅ Chart interaction setup complete - using native click API');
+  }
+
+  // ================================================
+  // CLEAN CANVAS OVERLAY DRAWING SYSTEM
+  // ================================================
+  
+  let drawingCanvas = null;
+  let drawingCtx = null;
+  let drawnLines = []; // {aTime, aPrice, bTime, bPrice, type: 'trendline'|'level'}
+  let currentDrawing = null; // {start: {x,y}, end: {x,y}} for preview
+  let drawingMode = null; // 'level' or 'trendline'
+  
+  function initDrawingCanvas() {
+    const chartContainer = document.getElementById('chart');
+    if (!chartContainer) {
+      console.error('[DRAW] Chart container not found');
+      return;
+    }
+    
+    // Create canvas element dynamically
+    drawingCanvas = document.createElement('canvas');
+    drawingCanvas.id = 'drawing-canvas';
+    chartContainer.appendChild(drawingCanvas);
+    
+    drawingCtx = drawingCanvas.getContext('2d');
+    resizeDrawingCanvas();
+    
+    // Resize observer
+    new ResizeObserver(resizeDrawingCanvas).observe(chartContainer);
+    
+    // Mouse events
+    drawingCanvas.addEventListener('mousedown', onCanvasMouseDown);
+    drawingCanvas.addEventListener('mousemove', onCanvasMouseMove);
+    drawingCanvas.addEventListener('mouseup', onCanvasMouseUp);
+    
+    // Redraw on chart pan/zoom
+    chart.subscribeCrosshairMove(redrawAllLines);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(redrawAllLines);
+    
+    console.log('[DRAW] ✅ Canvas overlay initialized');
+  }
+  
+  function resizeDrawingCanvas() {
+    const container = document.getElementById('chart');
+    drawingCanvas.width = container.clientWidth;
+    drawingCanvas.height = container.clientHeight;
+    redrawAllLines();
+  }
+  
+  function redrawAllLines() {
+    if (!drawingCtx) return;
+    
+    drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+    
+    // Draw all saved lines
+    for (const line of drawnLines) {
+      if (line.type === 'trendline') {
+        const ax = chart.timeScale().timeToCoordinate(line.aTime);
+        const ay = candleSeries.priceToCoordinate(line.aPrice);
+        const bx = chart.timeScale().timeToCoordinate(line.bTime);
+        const by = candleSeries.priceToCoordinate(line.bPrice);
+        
+        // Explicit null/undefined checks (allow coordinate 0)
+        if (ax !== null && ax !== undefined && ay !== null && ay !== undefined &&
+            bx !== null && bx !== undefined && by !== null && by !== undefined) {
+          drawingCtx.beginPath();
+          drawingCtx.moveTo(ax, ay);
+          drawingCtx.lineTo(bx, by);
+          drawingCtx.strokeStyle = line.color || 'rgba(245,158,11,0.9)';
+          drawingCtx.lineWidth = 2;
+          drawingCtx.stroke();
+        }
+      } else if (line.type === 'level') {
+        const y = candleSeries.priceToCoordinate(line.price);
+        // Explicit null/undefined check (allow coordinate 0)
+        if (y !== null && y !== undefined) {
+          drawingCtx.beginPath();
+          drawingCtx.moveTo(0, y);
+          drawingCtx.lineTo(drawingCanvas.width, y);
+          drawingCtx.strokeStyle = line.color || 'rgba(96,165,250,0.9)';
+          drawingCtx.lineWidth = 2;
+          drawingCtx.stroke();
+        }
+      }
+    }
+    
+    // Draw preview line
+    if (currentDrawing) {
+      drawingCtx.setLineDash([5, 3]);
+      drawingCtx.beginPath();
+      drawingCtx.moveTo(currentDrawing.start.x, currentDrawing.start.y);
+      drawingCtx.lineTo(currentDrawing.end.x, currentDrawing.end.y);
+      drawingCtx.strokeStyle = 'rgba(255,255,255,0.5)';
+      drawingCtx.lineWidth = 1;
+      drawingCtx.stroke();
+      drawingCtx.setLineDash([]);
+    }
+  }
+  
+  function onCanvasMouseDown(e) {
+    if (!drawingMode) return;
+    
+    const rect = drawingCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    if (drawingMode === 'level') {
+      // Single click creates horizontal level
+      const price = candleSeries.coordinateToPrice(y);
+      // Explicit null/undefined check (price can be any positive number)
+      if (price !== null && price !== undefined && isFinite(price)) {
+        drawnLines.push({
+          type: 'level',
+          price: price,
+          color: 'rgba(96,165,250,0.9)'
+        });
+        saveDrawings();
+        redrawAllLines();
+        drawingMode = null; // Auto-disable
+        document.body.classList.remove('drawing-mode');
+        drawingCanvas.classList.remove('drawing-active');
+        document.getElementById('toolLevel').classList.remove('active');
+        console.log('[DRAW] ✅ Level added at', price.toFixed(2));
+      }
+    } else if (drawingMode === 'trendline') {
+      if (!currentDrawing) {
+        // First click: start line
+        currentDrawing = { start: {x, y}, end: {x, y} };
+        console.log('[DRAW] Trendline started');
+      } else {
+        // Second click: finalize line
+        const aTime = chart.timeScale().coordinateToTime(currentDrawing.start.x);
+        const aPrice = candleSeries.coordinateToPrice(currentDrawing.start.y);
+        const bTime = chart.timeScale().coordinateToTime(x);
+        const bPrice = candleSeries.coordinateToPrice(y);
+        
+        // Explicit null/undefined checks (allow any valid number)
+        if (aTime !== null && aTime !== undefined && aPrice !== null && aPrice !== undefined &&
+            bTime !== null && bTime !== undefined && bPrice !== null && bPrice !== undefined &&
+            isFinite(aTime) && isFinite(aPrice) && isFinite(bTime) && isFinite(bPrice)) {
+          drawnLines.push({
+            type: 'trendline',
+            aTime, aPrice, bTime, bPrice,
+            color: 'rgba(245,158,11,0.9)'
+          });
+          saveDrawings();
+          redrawAllLines();
+          currentDrawing = null;
+          drawingMode = null; // Auto-disable
+          document.body.classList.remove('drawing-mode');
+          drawingCanvas.classList.remove('drawing-active');
+          document.getElementById('toolTrend').classList.remove('active');
+          console.log('[DRAW] ✅ Trendline added');
+        }
+      }
+    }
+  }
+  
+  function onCanvasMouseMove(e) {
+    if (currentDrawing) {
+      const rect = drawingCanvas.getBoundingClientRect();
+      currentDrawing.end = { 
+        x: e.clientX - rect.left, 
+        y: e.clientY - rect.top 
+      };
+      redrawAllLines();
+    }
+  }
+  
+  function onCanvasMouseUp(e) {
+    // Currently not needed, but available for drag functionality later
+  }
+  
+  function saveDrawings() {
+    const key = `drawings_${currentSymbol}_${currentTimeframe}`;
+    localStorage.setItem(key, JSON.stringify(drawnLines));
+  }
+  
+  function loadDrawings() {
+    const key = `drawings_${currentSymbol}_${currentTimeframe}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      try {
+        drawnLines = JSON.parse(saved);
+        redrawAllLines();
+        console.log('[DRAW] Loaded', drawnLines.length, 'drawings');
+      } catch (e) {
+        console.error('[DRAW] Failed to load drawings:', e);
+        drawnLines = [];
+      }
+    } else {
+      drawnLines = [];
+    }
+  }
+  
+  function clearAllDrawings() {
+    drawnLines = [];
+    saveDrawings();
+    redrawAllLines();
+    console.log('[DRAW] All drawings cleared');
   }
 
   // Check if click is near a trendline endpoint for resizing
@@ -6702,6 +6924,51 @@
   };
 
   // removeSymbol no longer needs to be global (using event delegation)
+
+  // ================================================
+  // DRAWING TOOL BUTTON HANDLERS
+  // ================================================
+  
+  document.getElementById('toolLevel').onclick = () => {
+    if (drawingMode === 'level') {
+      // Turn off
+      drawingMode = null;
+      document.getElementById('toolLevel').classList.remove('active');
+      document.body.classList.remove('drawing-mode');
+      if (drawingCanvas) drawingCanvas.classList.remove('drawing-active');
+      console.log('[DRAW] Level tool disabled');
+    } else {
+      // Turn on level tool, turn off trendline
+      drawingMode = 'level';
+      currentDrawing = null; // Cancel any in-progress trendline
+      document.getElementById('toolLevel').classList.add('active');
+      document.getElementById('toolTrend').classList.remove('active');
+      document.body.classList.add('drawing-mode');
+      if (drawingCanvas) drawingCanvas.classList.add('drawing-active');
+      console.log('[DRAW] Level tool enabled - click on chart to add level');
+    }
+  };
+  
+  document.getElementById('toolTrend').onclick = () => {
+    if (drawingMode === 'trendline') {
+      // Turn off
+      drawingMode = null;
+      currentDrawing = null;
+      document.getElementById('toolTrend').classList.remove('active');
+      document.body.classList.remove('drawing-mode');
+      if (drawingCanvas) drawingCanvas.classList.remove('drawing-active');
+      console.log('[DRAW] Trendline tool disabled');
+    } else {
+      // Turn on trendline tool, turn off level
+      drawingMode = 'trendline';
+      currentDrawing = null;
+      document.getElementById('toolTrend').classList.add('active');
+      document.getElementById('toolLevel').classList.remove('active');
+      document.body.classList.add('drawing-mode');
+      if (drawingCanvas) drawingCanvas.classList.add('drawing-active');
+      console.log('[DRAW] Trendline tool enabled - click twice on chart to draw trendline');
+    }
+  };
 
 
 })();
