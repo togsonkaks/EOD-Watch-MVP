@@ -1536,7 +1536,7 @@
       levels.forEach(l => {
         l.selected = (l.id === selectedLine.id);
       });
-      drawLevelsOnChart();
+      // drawLevelsOnChart(); // Removed - using canvas overlay instead
     }
   }
 
@@ -1897,8 +1897,8 @@
       levels[levelIndex].price = unifiedDragState.currentPrice;
       
       // Update visual representation IN-PLACE (no rebuild during drag)
-      const rec = levelLineById.get(unifiedDragState.dragTarget.id);
-      if (rec) {
+      // const rec = levelLineById.get(unifiedDragState.dragTarget.id); // Removed - using canvas overlay instead
+      if (false) { // Removed - using canvas overlay instead
         try { 
           candleSeries.removePriceLine(rec.line); 
           const line = candleSeries.createPriceLine({
@@ -2007,8 +2007,8 @@
     
     // Update visual representation IN-PLACE (no rebuild during drag)
     if (trendlineData) {
-      const rec = trendSeriesById.get(unifiedDragState.dragTarget.id);
-      if (rec && rec.series) {
+      // const rec = trendSeriesById.get(unifiedDragState.dragTarget.id); // Removed - using canvas overlay instead
+      if (false) { // Removed - using canvas overlay instead
         // Just update the data on existing series - NO remove/recreate!
         rec.series.setData(trendlineData);
         // Update stored data reference
@@ -2106,7 +2106,7 @@
         // CRITICAL: Save the MODIFIED array that was updated during drag
         const dataToSave = unifiedDragState.modifiedLevels || getLevelsForSymbol(currentSymbol, currentTimeframe);
         saveLevelsForSymbol(currentSymbol, currentTimeframe, dataToSave);
-        drawLevelsOnChart(); // CRITICAL: Rebuild hit test map with new coordinates
+        // drawLevelsOnChart(); // Removed - using canvas overlay instead
         updateLineHandles();
         evaluateCurrentSignals();
         console.log('[EOD] 💾 Level drag completed & saved');
@@ -2114,7 +2114,7 @@
         // CRITICAL: Save the MODIFIED array that was updated during drag
         const dataToSave = unifiedDragState.modifiedTrendlines || getTrendlinesForSymbol(currentSymbol, currentTimeframe);
         saveTrendlinesForSymbol(currentSymbol, currentTimeframe, dataToSave);
-        drawTrendlinesOnChart(); // CRITICAL: Rebuild hit test map with new coordinates
+        // drawTrendlinesOnChart(); // Removed - using canvas overlay instead
         updateLineHandles();
         evaluateCurrentSignals();
         console.log('[EOD] 💾 Trendline drag completed & saved');
@@ -2145,10 +2145,12 @@
     
     if (trendlineHit) {
       targetType = 'trendline';
-      targetData = trendSeriesById.get(trendlineHit.id)?.data;
+      // targetData = trendSeriesById.get(trendlineHit.id)?.data; // Removed - using canvas overlay instead
+      targetData = trendlineHit; // Use hit data directly
     } else if (levelHit) {
       targetType = 'level';
-      targetData = levelLineById.get(levelHit.id)?.data;
+      // targetData = levelLineById.get(levelHit.id)?.data; // Removed - using canvas overlay instead
+      targetData = levelHit; // Use hit data directly
     } else if (indicatorHit) {
       if (indicatorHit.type === 'ema') {
         targetType = 'ema';
@@ -2315,7 +2317,7 @@
   
   // Set up chart events now that chart is fully initialized
   setupChartEventSynchronization();
-  setupChartInteraction();
+  // setupChartInteraction(); // Removed - using canvas overlay instead
   initDrawingCanvas();
   
   // Force resize to ensure proper rendering
@@ -2763,7 +2765,7 @@
       overlayCtx.scale(dpr, dpr);
       overlayCanvas.style.width = rect.width + 'px';
       overlayCanvas.style.height = rect.height + 'px';
-      renderOverlay();
+      // renderOverlay(); // Removed - using canvas overlay instead
     }
     
     resizeOverlayCanvas();
@@ -2775,13 +2777,13 @@
     resizeObserver.observe(document.getElementById('chart'));
     
     // Subscribe to ALL chart changes for complete re-rendering
-    chart.timeScale().subscribeVisibleLogicalRangeChange(() => renderOverlay());
+    // chart.timeScale().subscribeVisibleLogicalRangeChange(() => renderOverlay()); // Removed - using canvas overlay instead
     
     // Subscribe to chart size changes for Y coordinate updates
     const originalResize = chart.resize.bind(chart);
     chart.resize = (w, h) => {
       const result = originalResize(w, h);
-      renderOverlay();
+      // renderOverlay(); // Removed - using canvas overlay instead
       return result;
     };
     
@@ -2867,7 +2869,7 @@
         
         // Update line position based on drag mode
         updateLinePositionDuringDrag(x, y);
-        renderOverlay();
+        // renderOverlay(); // Removed - using canvas overlay instead
       }
     });
     
@@ -3267,7 +3269,7 @@
         overlayCanvas.style.cursor = 'ns-resize';
       }
       
-      renderOverlay(); // Re-render to show selection
+      // renderOverlay(); // Removed - using canvas overlay instead
     }
   }
   
@@ -3379,7 +3381,7 @@
       selectedDrawing = null;
     }
     
-    renderOverlay();
+    // renderOverlay(); // Removed - using canvas overlay instead
     console.log('[EOD] 🗑️ Deleted', type, 'at index', index);
   };
   
@@ -3410,7 +3412,7 @@
       selectedDrawing = null;
     }
     
-    renderOverlay();
+    // renderOverlay(); // Removed - using canvas overlay instead
     console.log('[EOD] 🗑️ Deleted', drawing.type, 'at index', drawing.index);
   }
 
@@ -3527,7 +3529,7 @@
     
     drawings.levels.push(newLevel);
     saveDrawingsForSymbol(currentSymbol, currentTimeframe, drawings);
-    renderOverlay();
+    // renderOverlay(); // Removed - using canvas overlay instead
     
     console.log('[EOD] ✅ Overlay level added at', price.toFixed(2));
     return newLevel;
@@ -3547,7 +3549,7 @@
     
     drawings.trendlines.push(newTrendline);
     saveDrawingsForSymbol(currentSymbol, currentTimeframe, drawings);
-    renderOverlay();
+    // renderOverlay(); // Removed - using canvas overlay instead
     
     console.log('[EOD] ✅ Overlay trendline added');
     return newTrendline;
@@ -3574,7 +3576,7 @@
     if (updated) {
       saveDrawingsForSymbol(symbol, timeframe, drawings);
       if (symbol === currentSymbol && timeframe === currentTimeframe) {
-        renderOverlay();
+        // renderOverlay(); // Removed - using canvas overlay instead
       }
       console.log('[EOD] ✅ Overlay drawing updated:', drawingId);
     }
@@ -3603,7 +3605,7 @@
     if (deleted) {
       saveDrawingsForSymbol(symbol, timeframe, drawings);
       if (symbol === currentSymbol && timeframe === currentTimeframe) {
-        renderOverlay();
+        // renderOverlay(); // Removed - using canvas overlay instead
       }
       console.log('[EOD] ✅ Overlay drawing deleted:', drawingId);
     }
@@ -3680,11 +3682,11 @@
     console.log(`[EOD] ✅ Canvas dimensions synced: ${rect.width}x${rect.height} CSS, DPR: ${dpr}`);
   }
   
-  let renderOverlayThrottle = null;
-  function renderOverlay() {
-    // Overlay rendering disabled - LineSeries handles all rendering automatically
-    // No action needed
-  }
+  // let renderOverlayThrottle = null; // Removed - using canvas overlay instead
+  // function renderOverlay() { // Removed - using canvas overlay instead
+  //   // Overlay rendering disabled - LineSeries handles all rendering automatically
+  //   // No action needed
+  // }
   
   // ===== COORDINATE ACCURACY VALIDATION =====
   function validateCoordinateAccuracy() {
@@ -3739,67 +3741,68 @@
     
     if (driftDetected) {
       console.log('[EOD] 🔄 Coordinate drift detected - triggering corrective overlay redraw');
-      renderOverlay();
+      // renderOverlay(); // Removed - using canvas overlay instead
     }
   }
   
-  function renderOverlayImmediate() {
-    // Overlay rendering disabled - LineSeries handles all rendering
-    return;
-    
-    // Get canvas dimensions
-    const chartContainer = document.getElementById('chart');
-    const rect = chartContainer.getBoundingClientRect();
-    
-    // Clear canvas
-    overlayCtx.clearRect(0, 0, rect.width, rect.height);
-    
-    // Get current drawings
-    const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
-    
-    // Render levels
-    drawings.levels.forEach(level => {
-      const y = safePriceToChart(level.price);
-      if (y !== null && !isNaN(y)) {
-        overlayCtx.save();
-        overlayCtx.strokeStyle = level.color || '#60a5fa';
-        overlayCtx.lineWidth = 2;
-        overlayCtx.setLineDash([]);
-        overlayCtx.beginPath();
-        overlayCtx.moveTo(0, y);
-        overlayCtx.lineTo(rect.width, y);
-        overlayCtx.stroke();
-        overlayCtx.restore();
-      }
-    });
-    
-    // Render trendlines
-    drawings.trendlines.forEach(trendline => {
-      // Use DIRECT coordinate conversion - no logical intermediates
-      const x1 = chart.timeScale().timeToCoordinate(trendline.startTime);
-      const y1 = safePriceToChart(trendline.startPrice);
-      const x2 = chart.timeScale().timeToCoordinate(trendline.endTime);
-      const y2 = safePriceToChart(trendline.endPrice);
-      
-      if (x1 !== null && y1 !== null && x2 !== null && y2 !== null &&
-          !isNaN(x1) && !isNaN(y1) && !isNaN(x2) && !isNaN(y2)) {
-        overlayCtx.save();
-        overlayCtx.strokeStyle = trendline.color || '#f59e0b';
-        overlayCtx.lineWidth = 2;
-        overlayCtx.setLineDash([]);
-        overlayCtx.beginPath();
-        overlayCtx.moveTo(x1, y1);
-        overlayCtx.lineTo(x2, y2);
-        overlayCtx.stroke();
-        overlayCtx.restore();
-      }
-    });
-    
-    // Render selection handles if needed
-    if (selectedDrawing) {
-      renderSelectionHandles(selectedDrawing);
-    }
-  }
+  // Removed - using canvas overlay instead
+  // function renderOverlayImmediate() {
+  //   // Overlay rendering disabled - LineSeries handles all rendering
+  //   return;
+  //   
+  //   // Get canvas dimensions
+  //   const chartContainer = document.getElementById('chart');
+  //   const rect = chartContainer.getBoundingClientRect();
+  //   
+  //   // Clear canvas
+  //   overlayCtx.clearRect(0, 0, rect.width, rect.height);
+  //   
+  //   // Get current drawings
+  //   const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
+  //   
+  //   // Render levels
+  //   drawings.levels.forEach(level => {
+  //     const y = safePriceToChart(level.price);
+  //     if (y !== null && !isNaN(y)) {
+  //       overlayCtx.save();
+  //       overlayCtx.strokeStyle = level.color || '#60a5fa';
+  //       overlayCtx.lineWidth = 2;
+  //       overlayCtx.setLineDash([]);
+  //       overlayCtx.beginPath();
+  //       overlayCtx.moveTo(0, y);
+  //       overlayCtx.lineTo(rect.width, y);
+  //       overlayCtx.stroke();
+  //       overlayCtx.restore();
+  //     }
+  //   });
+  //   
+  //   // Render trendlines
+  //   drawings.trendlines.forEach(trendline => {
+  //     // Use DIRECT coordinate conversion - no logical intermediates
+  //     const x1 = chart.timeScale().timeToCoordinate(trendline.startTime);
+  //     const y1 = safePriceToChart(trendline.startPrice);
+  //     const x2 = chart.timeScale().timeToCoordinate(trendline.endTime);
+  //     const y2 = safePriceToChart(trendline.endPrice);
+  //     
+  //     if (x1 !== null && y1 !== null && x2 !== null && y2 !== null &&
+  //         !isNaN(x1) && !isNaN(y1) && !isNaN(x2) && !isNaN(y2)) {
+  //       overlayCtx.save();
+  //       overlayCtx.strokeStyle = trendline.color || '#f59e0b';
+  //       overlayCtx.lineWidth = 2;
+  //       overlayCtx.setLineDash([]);
+  //       overlayCtx.beginPath();
+  //       overlayCtx.moveTo(x1, y1);
+  //       overlayCtx.lineTo(x2, y2);
+  //       overlayCtx.stroke();
+  //       overlayCtx.restore();
+  //     }
+  //   });
+  //   
+  //   // Render selection handles if needed
+  //   if (selectedDrawing) {
+  //     renderSelectionHandles(selectedDrawing);
+  //   }
+  // }
 
   function renderSelectionHandles(selectedObj) {
     if (!overlayCtx) return;
@@ -4143,13 +4146,10 @@
         loadDrawings();
       }
       
-      updateLevelsDisplay();
-      drawLevelsOnChart();
-      updateTrendlinesDisplay();
-      drawTrendlinesOnChart();
+      // Removed old LineSeries drawing code - using canvas overlay instead
       
-      // Load and render overlay drawings for this symbol/timeframe
-      renderOverlay();
+      // Load and render canvas overlay drawings for this symbol/timeframe
+      redrawAllLines();
       
       // Update status to connected
       $('#status-dot').className = 'status-dot status-connected';
@@ -4969,9 +4969,9 @@
     
     // Redraw lines to show selection visually
     if (line.type === 'level') {
-      drawLevelsOnChart();
+      // drawLevelsOnChart(); // Removed - using canvas overlay instead
     } else {
-      drawTrendlinesOnChart();
+      // drawTrendlinesOnChart(); // Removed - using canvas overlay instead
     }
     
     // Show line controls
@@ -5012,9 +5012,9 @@
     
     // Redraw lines to remove selection visuals
     if (selectedLine.type === 'level') {
-      drawLevelsOnChart();
+      // drawLevelsOnChart(); // Removed - using canvas overlay instead
     } else {
-      drawTrendlinesOnChart();
+      // drawTrendlinesOnChart(); // Removed - using canvas overlay instead
     }
     
     selectedLine = null;
@@ -5283,7 +5283,7 @@
               // REAL-TIME visual update during drag - keeps handles attached!
               try {
                 saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
-                drawTrendlinesOnChart();
+                // drawTrendlinesOnChart(); // Removed - using canvas overlay instead
                 updateLineHandles(); // Keep handles visually connected
               } catch (error) {
                 console.warn('[EOD] Error during trendline redraw:', error);
@@ -5317,7 +5317,7 @@
             // REAL-TIME visual update during drag - keeps handles attached!
             try {
               saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
-              drawLevelsOnChart();
+              // drawLevelsOnChart(); // Removed - using canvas overlay instead
               updateLineHandles(); // Keep handles visually connected
             } catch (error) {
               console.warn('[EOD] Error during level redraw:', error);
@@ -5470,7 +5470,7 @@
         if (levelIndex >= 0) {
           symbolLevels.splice(levelIndex, 1);
           saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
-          drawLevelsOnChart();
+          // drawLevelsOnChart(); // Removed - using canvas overlay instead
           clearLineHandles();
           selectedLine = null;
           log(`🗑️ Level line deleted`);
@@ -5483,7 +5483,7 @@
         if (trendlineIndex >= 0) {
           symbolTrendlines.splice(trendlineIndex, 1);
           saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
-          drawTrendlinesOnChart();
+          // drawTrendlinesOnChart(); // Removed - using canvas overlay instead
           clearLineHandles();
           selectedLine = null;
           log(`🗑️ Trendline deleted`);
@@ -5558,8 +5558,8 @@
   // ---- Initialize
   updateWatchlistDisplay();
   updateIndicatorToggles();
-  updateLevelsDisplay();
-  updateTrendlinesDisplay();
+  // updateLevelsDisplay(); // Removed - using canvas overlay instead
+  // updateTrendlinesDisplay();
   loadSymbol(currentSymbol);
 
   // health check with status indicator
