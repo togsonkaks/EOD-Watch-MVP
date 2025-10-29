@@ -49,47 +49,40 @@ A comprehensive multi-symbol stock watchlist platform with advanced drawing tool
 
 ## Recent Changes (2025-10-29)
 
-### Phase 8: Clean Canvas Overlay Drawing System (Completed)
-**Clean Implementation Following ChatGPT's Approach**
-- **Strategy**: Store lines as chart coordinates (time/price), convert to pixels only when rendering
-- **Canvas Overlay**: Dynamically created `<canvas>` positioned absolutely on top of chart container
-- **Pointer Events Management**: CSS toggle between `pointer-events: none` (chart interactive) and `pointer-events: all` (drawing mode active)
-- **Architecture**: Removed ~2000 lines of broken coordinate conversion and pointer event code from legacy system
+### Phase 9: Interactive Drawing Tools - LineSeries System (In Progress)
+**Architecture Change: Canvas Overlay → LineSeries with Mouse Interaction**
+- **Project Goal**: Build interactive drawing demo to secure stakeholder approval for TradingView Advanced Charts license
+- **User Requirement**: Lines must be selectable, movable, extendable, and deletable (not just drawable)
+- **Technical Approach**: ChatGPT's simplified system using chart's native LineSeries + custom mouse interaction layer
 
-**What Was Built**
-- ✅ **Click-to-Draw System**: First click starts line, mousemove shows dotted preview, second click finalizes
-- ✅ **Chart Coordinate Storage**: Trendlines stored as `{aTime, aPrice, bTime, bPrice}`, levels as `{price}`
-- ✅ **Pixel Conversion on Render**: Use `chart.timeScale().timeToCoordinate()` and `candleSeries.priceToCoordinate()` to convert chart units → screen pixels
-- ✅ **Chart Event Subscriptions**: Redraw canvas on pan/zoom using `subscribeCrosshairMove` and `subscribeVisibleLogicalRangeChange`
-- ✅ **localStorage Persistence**: Save/load drawings per symbol/timeframe combination
-- ✅ **Auto-disable After Drawing**: Drawing mode automatically turns off after completing each line
+**Why LineSeries Instead of Canvas Overlay?**
+- Canvas overlay was too simplistic - couldn't support interactive line manipulation
+- LineSeries uses chart's native rendering (perfect integration, no coordinate bugs)
+- Custom mouse event handlers add selection, dragging, extending, and context menu features
 
-**Key Implementation Details**
-- **Dynamic Canvas Creation**: `initDrawingCanvas()` creates canvas after chart container is ready to avoid innerHTML clearing issues
-- **Pointer-Events Gating**: `.drawing-active` CSS class toggles canvas pointer interception to prevent blocking chart interaction
-- **Coordinate Validation**: Explicit `!== null && !== undefined` checks (not truthy) to allow lines touching chart edges (coordinate 0)
-- **Preview Line**: Dotted gray line shows during trendline drawing before finalization
+**What Was Implemented**
+- ✅ **Removed Canvas Overlay**: Eliminated entire canvas overlay system (~200 lines removed)
+- ✅ **LineSeries for Trendlines**: Uses `LineSeries.setData()` for perfect chart-native rendering
+- ✅ **PriceLines for Levels**: Uses `candleSeries.createPriceLine()` for horizontal levels
+- ✅ **Mouse Interaction Layer**: Direct event listeners on chart container for hit testing
+- ✅ **Hit Testing**: Point-to-line distance calculations to detect clicks on trendlines
+- ✅ **Drag Handles**: Visual circles at trendline endpoints for moving/extending lines
+- ✅ **Context Menu**: Right-click menu for delete/extend/alert operations
+- ✅ **localStorage Persistence**: Save/load per symbol/timeframe
 
-**Technical Fixes Applied**
-- Fixed pointer-events blocking chart interaction (default to `none`, enable only during drawing)
-- Fixed coordinate validation bug where 0-valued edge coordinates were treated as falsy
-- Fixed canvas initialization timing to prevent DOM conflicts
-- Removed complex coordinate conversion system and pointer event handlers from legacy code
+**Current Implementation Status**
+- ✅ Drawing system initialized successfully
+- ✅ Server running without errors
+- ⏳ Testing interactive features (drag, extend, delete)
+- ⏳ Verifying hit testing and handle detection
+- ⏳ Confirming context menu functionality
 
-**Results**
-- ✅ Clean, simple codebase (~200 lines vs ~2000 lines of legacy code)
-- ✅ Lines persist across symbol/timeframe changes
-- ✅ Lines redraw correctly on pan/zoom operations
-- ✅ Chart remains fully interactive when not in drawing mode
-- ✅ No coordinate conversion errors or flickering
-- ✅ Architect-reviewed and approved
-
-**Next Steps for User Testing**
-1. Click "+ Level" button → click on chart → verify horizontal line appears
-2. Click "+ Trend (2-click)" button → click twice on chart → verify trendline appears
-3. Pan/zoom chart → verify lines stay attached to price levels
-4. Switch symbols → verify drawings persist per symbol
-5. Reload page → verify drawings restore from localStorage
+**Next Testing Steps**
+1. Click "+ Trend (2-click)" → draw trendline → verify it renders
+2. Click near trendline body → verify selection highlighting
+3. Click/drag trendline endpoint handles → verify line moves/extends
+4. Right-click trendline → verify context menu appears
+5. Test delete/extend operations from context menu
 
 ## Recent Changes (2025-09-21)
 
