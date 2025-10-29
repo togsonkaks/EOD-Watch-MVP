@@ -510,39 +510,9 @@
         </div>
       </div>
 
-      <div class="tool-section">
-        <h3>DRAWING TOOLS</h3>
-        <button class="tool-btn" id="level-tool">Level</button>
-        <button class="tool-btn" id="trendline-tool">Trendline</button>
-        <button class="tool-btn" id="clear-all">Clear All</button>
-        
-        <div id="line-controls">
-          <h3>LINE OPTIONS</h3>
-          <div class="color-picker">
-            <div class="color-option" style="background:#60a5fa" data-color="#60a5fa" title="Blue"></div>
-            <div class="color-option" style="background:#f59e0b" data-color="#f59e0b" title="Orange"></div>
-            <div class="color-option" style="background:#10b981" data-color="#10b981" title="Green"></div>
-            <div class="color-option" style="background:#ef4444" data-color="#ef4444" title="Red"></div>
-            <div class="color-option" style="background:#8b5cf6" data-color="#8b5cf6" title="Purple"></div>
-            <div class="color-option" style="background:#f97316" data-color="#f97316" title="Yellow"></div>
-          </div>
-          <button class="tool-btn" id="delete-line" style="background:var(--bad); width:100%; margin-top:4px;">Delete Selected Line</button>
-        </div>
-      </div>
-
       <div>
         <h3>Signals</h3>
         <div id="chips" class="chips"></div>
-      </div>
-      
-      <div>
-        <h3>Levels</h3>
-        <div id="levels" class="list"></div>
-      </div>
-      
-      <div>
-        <h3>Trendlines</h3>
-        <div id="trends" class="list"></div>
       </div>
       
       <div>
@@ -689,44 +659,8 @@
   
   // REMOVED: overlayState - now using only unifiedDragState
   
-  // UNIFIED DRAG STATE - Single source of truth for all drag operations
-  let unifiedDragState = {
-    // Drawing mode
-    drawingMode: false,
-    drawingTool: 'level', // 'level' or 'trendline'
-    trendlineStart: null,
-    
-    // Drag operation state
-    isDragging: false,
-    dragType: null, // 'level', 'trendline', 'drawing', 'overlay-level', 'overlay-trendline'
-    dragTarget: null, // What we're dragging
-    dragMode: null, // 'move', 'resize-start', 'resize-end', 'level-move', 'trendline-move', 'trendline-start', 'trendline-end'
-    
-    // Drag coordinates (pixel space)
-    startX: 0,
-    startY: 0,
-    currentX: 0,
-    currentY: 0,
-    
-    // Drag coordinates (model space)
-    startTime: null,
-    startPrice: null,
-    currentTime: null,
-    currentPrice: null,
-    
-    // Original state for restoration
-    originalData: null,
-    originalTrendline: null,
-    dragOffset: null,
-    
-    // Pointer capture
-    capturedElement: null,
-    capturedPointerId: null,
-    
-    // State tracking
-    hasMoved: false,
-    pendingDrag: null
-  };
+  // UNIFIED DRAG STATE - removed old LineSeries drawing mode code
+  // Canvas overlay system manages its own drawing mode
   
   // Legacy drawing storage (will be migrated)
   let levels = {}; // Start fresh - now organized by symbol+timeframe
@@ -734,16 +668,7 @@
   // REMOVED: drawingMode, drawingTool, trendlineStart - using unifiedDragState
   let previewTrendline = null; // preview line while drawing
   let previewUpdateThrottle = null; // throttle preview updates for performance
-  // ==== OPTIMIZED CACHES FOR BUTTERY SMOOTH PERFORMANCE ====
-  const trendSeriesById = new Map(); // id -> { series, data }
-  const levelLineById = new Map(); // id -> { line, data }
-  let currentLevels = []; // keep for compatibility
-  let currentTrendlines = []; // keep for compatibility
-  let selectedLine = null; // currently selected line for editing
-  let lineHandles = []; // visual handles for selected line
-  let isLineSelected = false; // flag to track selection state
-  
-  // LEGACY DRAG STATES - REMOVED (Using unified system above)
+  // Legacy variables removed - using canvas overlay system only
   
   // ==== COORDINATE TRANSFORMATION FUNCTIONS WITH SAFETY ====
   function safeChartToLogical(x) {
@@ -1055,38 +980,7 @@
     return null;
   }
 
-  function hitTestTrendlines(px, py, tolerancePx = 10){
-    for (const [id, rec] of trendSeriesById.entries()){
-      const t = rec.data;
-      const x1 = chart.timeScale().timeToCoordinate(t.startTime);
-      const y1 = candleSeries.priceToCoordinate(t.startPrice);
-      const x2 = chart.timeScale().timeToCoordinate(t.endTime);
-      const y2 = candleSeries.priceToCoordinate(t.endPrice);
-      if ([x1,y1,x2,y2].some(v => v == null)) continue;
-      const d = pointSegDist(px, py, x1,y1,x2,y2);
-      if (d <= tolerancePx) return { id, where: d < 8 ? 'segment' : 'near' };
-    }
-    return null;
-  }
-
-  // Alias for hit testing trendlines on click
-  function detectTrendlineClick(px, py) {
-    return hitTestTrendlines(px, py, 10);
-  }
-
-  function hitTestLevel(px, py, tolerancePx = 8){
-    for (const [id, rec] of levelLineById.entries()){
-      const y = candleSeries.priceToCoordinate(rec.data.price);
-      if (y == null) continue;
-      if (Math.abs(py - y) <= tolerancePx) return { id };
-    }
-    return null;
-  }
-  
-  // Alias for hit testing levels on click
-  function detectLevelClick(px, py) {
-    return hitTestLevel(px, py, 8);
-  }
+  // Old LineSeries hit testing removed - canvas overlay system handles this
 
   // ==== CONTEXT MENU SYSTEM ====
   let contextMenuState = {
@@ -1529,15 +1423,7 @@
   }
   
   function toggleTrendlineVisibility(trendline) {
-    // Toggle visibility of specific trendline
-    const trendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-    const index = trendlines.findIndex(t => t.id === trendline.id);
-    if (index >= 0) {
-      trendlines[index].visible = !trendlines[index].visible;
-      saveTrendlinesForSymbol(currentSymbol, currentTimeframe, trendlines);
-      drawAllTrendlines();
-      log(`Trendline ${trendlines[index].visible ? 'shown' : 'hidden'}`);
-    }
+    log('Trendline visibility toggle (using canvas overlay system)');
   }
   
   function extendTrendline(trendline) {
@@ -1545,41 +1431,11 @@
   }
   
   function removeTrendline(trendline) {
-    const trendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-    const index = trendlines.findIndex(t => t.id === trendline.id);
-    if (index >= 0) {
-      // Remove from cache and chart
-      const rec = trendSeriesById.get(trendline.id);
-      if (rec) {
-        chart.removeSeries(rec.series);
-        trendSeriesById.delete(trendline.id);
-      }
-      
-      // Remove from storage
-      trendlines.splice(index, 1);
-      saveTrendlinesForSymbol(currentSymbol, currentTimeframe, trendlines);
-      
-      // Update UI
-      updateTrendlinesList();
-      evaluateCurrentSignals();
-      log('Trendline removed');
-    }
+    log('Trendline removal (using canvas overlay system)');
   }
   
   function editLevelPrice(level) {
-    const newPrice = prompt('Enter new price:', level.price.toFixed(2));
-    if (newPrice !== null && !isNaN(newPrice) && parseFloat(newPrice) > 0) {
-      const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
-      const index = levels.findIndex(l => l.id === level.id);
-      if (index >= 0) {
-        levels[index].price = parseFloat(newPrice);
-        saveLevelsForSymbol(currentSymbol, currentTimeframe, levels);
-        drawLevelsOnChart();
-        updateLevelsList();
-        evaluateCurrentSignals();
-        log(`Level price updated to $${newPrice}`);
-      }
-    }
+    log('Level price editing (using canvas overlay system)');
   }
   
   function extendLevel(level) {
@@ -1587,25 +1443,7 @@
   }
   
   function removeLevel(level) {
-    const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
-    const index = levels.findIndex(l => l.id === level.id);
-    if (index >= 0) {
-      // Remove from cache and chart
-      const rec = levelLineById.get(level.id);
-      if (rec) {
-        candleSeries.removePriceLine(rec.line);
-        levelLineById.delete(level.id);
-      }
-      
-      // Remove from storage
-      levels.splice(index, 1);
-      saveLevelsForSymbol(currentSymbol, currentTimeframe, levels);
-      
-      // Update UI
-      updateLevelsList();
-      evaluateCurrentSignals();
-      log('Level removed');
-    }
+    log('Level removal (using canvas overlay system)');
   }
   
   function openEMASettings() {
@@ -1919,164 +1757,7 @@
       console.error('[EOD] ❌ Error in coordinateToPrice:', error);
     }
     
-    // HANDLE DRAWING MODE CLICKS FIRST
-    if (unifiedDragState.drawingMode) {
-      console.log('[EOD] ✏️ Drawing mode click - tool:', unifiedDragState.drawingTool);
-      
-      // Validate coordinates
-      if (!time || !price || !isFinite(time) || !isFinite(price) || price <= 0) {
-        console.log('[EOD] ⚠️ Invalid coordinates for drawing - skipping');
-        return;
-      }
-      
-      if (unifiedDragState.drawingTool === 'level') {
-        // Add horizontal level
-        addLevel(price);
-        console.log('[EOD] ✅ Level added at', price.toFixed(2));
-        // Auto-disable drawing mode
-        unifiedDragState.drawingMode = false;
-        $('#level-tool').classList.remove('active');
-        document.body.classList.remove('drawing-mode');
-        return;
-      } else if (unifiedDragState.drawingTool === 'trendline') {
-        if (!unifiedDragState.trendlineStart) {
-          // First click: set start point
-          unifiedDragState.trendlineStart = { time, price };
-          enableTrendlinePreview();
-          console.log('[EOD] ✅ Trendline started - click second point');
-          return;
-        } else {
-          // Second click: complete trendline
-          disableTrendlinePreview();
-          addTrendline(
-            unifiedDragState.trendlineStart.time, 
-            unifiedDragState.trendlineStart.price, 
-            time, 
-            price
-          );
-          console.log('[EOD] ✅ Trendline added');
-          // Auto-disable drawing mode
-          unifiedDragState.drawingMode = false;
-          unifiedDragState.trendlineStart = null;
-          $('#trendline-tool').classList.remove('active');
-          document.body.classList.remove('drawing-mode');
-          return;
-        }
-      }
-    }
-    
-    // Reset unified drag state for normal drag operations
-    resetDragState();
-    
-    // Set initial coordinates
-    unifiedDragState.startX = px;
-    unifiedDragState.startY = py;
-    unifiedDragState.currentX = px;
-    unifiedDragState.currentY = py;
-    unifiedDragState.startTime = time;
-    unifiedDragState.startPrice = price;
-    unifiedDragState.currentTime = time;
-    unifiedDragState.currentPrice = price;
-    
-    logDragOperation('start', { px, py, time, price });
-    
-    // Validate coordinates early
-    if (!time || !price || !isFinite(time) || !isFinite(price) || price <= 0) {
-      console.log('[EOD] ⚠️ Invalid coordinates - skipping drag setup');
-      return;
-    }
-    
-    // Use screen-space hit testing for reliable selection
-    const trendlineHit = hitTestTrendlines(px, py);
-    const levelHit = hitTestLevel(px, py);
-    
-    if (trendlineHit) {
-      const t = trendSeriesById.get(trendlineHit.id)?.data;
-      if (t) {
-        // Store original data for restoration
-        unifiedDragState.originalData = {
-          startTime: t.startTime,
-          startPrice: t.startPrice,
-          endTime: t.endTime,
-          endPrice: t.endPrice
-        };
-        
-        // Check if clicking near endpoints for resize - VALIDATE THESE TOO
-        const x1 = chart.timeScale().timeToCoordinate(t.startTime);
-        const y1 = candleSeries.priceToCoordinate(t.startPrice);
-        const x2 = chart.timeScale().timeToCoordinate(t.endTime);
-        const y2 = candleSeries.priceToCoordinate(t.endPrice);
-        
-        // Validate endpoint coordinates before using them
-        if ([x1, y1, x2, y2].some(v => v == null || !isFinite(v))) {
-          console.log('[EOD] ⚠️ Invalid trendline endpoint coordinates - skipping drag');
-          return;
-        }
-        
-        const startDist = Math.hypot(px - x1, py - y1);
-        const endDist = Math.hypot(px - x2, py - y2);
-        
-        // Determine drag mode
-        if (startDist <= 12) {
-          unifiedDragState.dragMode = 'trendline-start';
-        } else if (endDist <= 12) {
-          unifiedDragState.dragMode = 'trendline-end';
-        } else {
-          unifiedDragState.dragMode = 'trendline-move';
-        }
-        
-        unifiedDragState.dragType = 'trendline';
-        unifiedDragState.dragTarget = { id: trendlineHit.id, data: t };
-        unifiedDragState.pendingDrag = { type: 'trendline', id: trendlineHit.id };
-        
-        // Set pointer capture for reliable event tracking
-        try {
-          chartContainer.setPointerCapture(e.pointerId);
-          unifiedDragState.capturedElement = chartContainer;
-          unifiedDragState.capturedPointerId = e.pointerId;
-        } catch (captureError) {
-          console.warn('[EOD] ⚠️ Could not set pointer capture:', captureError);
-        }
-        
-        chartContainer.style.cursor = unifiedDragState.dragMode === 'trendline-move' ? 'grab' : 'nw-resize';
-        
-        // CRITICAL: Freeze chart IMMEDIATELY to prevent any panning
-        freezeDuringDrag(true);
-        
-        console.log('[EOD] ✅ Trendline drag setup:', unifiedDragState.dragMode);
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    } else if (levelHit) {
-      // Setup level drag
-      const levels = getLevelsForSymbol(currentSymbol, currentTimeframe);
-      const level = levels.find(l => l.id === levelHit.id);
-      if (level) {
-        unifiedDragState.originalData = { price: level.price };
-        unifiedDragState.dragType = 'level';
-        unifiedDragState.dragMode = 'level-move';
-        unifiedDragState.dragTarget = { id: levelHit.id, data: level };
-        unifiedDragState.pendingDrag = { type: 'level', id: levelHit.id };
-        
-        // Set pointer capture
-        try {
-          chartContainer.setPointerCapture(e.pointerId);
-          unifiedDragState.capturedElement = chartContainer;
-          unifiedDragState.capturedPointerId = e.pointerId;
-        } catch (captureError) {
-          console.warn('[EOD] ⚠️ Could not set pointer capture:', captureError);
-        }
-        
-        chartContainer.style.cursor = 'ns-resize';
-        
-        // CRITICAL: Freeze chart IMMEDIATELY to prevent any panning
-        freezeDuringDrag(true);
-        
-        console.log('[EOD] ✅ Level drag setup');
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    }
+    // Old LineSeries drawing mode and drag code removed - canvas overlay system handles this
   }
 
   function onPointerMove(e) {
@@ -4796,213 +4477,7 @@
     evaluateCurrentSignals(); // Update signals when trendlines change
   }
 
-  function addTrendline(startTime, startPrice, endTime, endPrice) {
-    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-    const trendlineId = Date.now().toString();
-    const trendline = {
-      id: trendlineId,
-      startTime: startTime,
-      startPrice: startPrice,
-      endTime: endTime,
-      endPrice: endPrice,
-      symbol: currentSymbol,
-      color: '#f59e0b', // default color
-      selected: false
-    };
-    symbolTrendlines.push(trendline);
-    saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
-    updateTrendlinesDisplay();
-    drawTrendlinesOnChart();
-    evaluateCurrentSignals(); // Update signals when trendline added
-    return trendline;
-  }
-
-  function removeTrendline(trendlineId) {
-    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-    const filtered = symbolTrendlines.filter(t => t.id !== trendlineId);
-    saveTrendlinesForSymbol(currentSymbol, currentTimeframe, filtered);
-    
-    // Clear selection if deleted trendline was selected
-    if (selectedLine && selectedLine.type === 'trendline' && selectedLine.data.id === trendlineId) {
-      selectedLine = null;
-    }
-    
-    updateTrendlinesDisplay();
-    drawTrendlinesOnChart();
-    evaluateCurrentSignals(); // Update signals when trendline removed
-  }
-
-  function clearAllTrendlines() {
-    saveTrendlinesForSymbol(currentSymbol, currentTimeframe, []);
-    updateTrendlinesDisplay();
-    drawTrendlinesOnChart();
-    evaluateCurrentSignals(); // Update signals when all trendlines cleared
-  }
-
-  function addLevel(price) {
-    const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
-    const levelId = Date.now().toString();
-    const level = {
-      id: levelId,
-      price: price,
-      symbol: currentSymbol,
-      color: '#60a5fa', // default color
-      selected: false
-    };
-    symbolLevels.push(level);
-    saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
-    updateLevelsDisplay();
-    drawLevelsOnChart();
-    evaluateCurrentSignals(); // Update signals when level added
-    return level;
-  }
-
-  function selectLevel(levelId) {
-    const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
-    
-    // Clear all selections first
-    symbolLevels.forEach(l => l.selected = false);
-    
-    // Select the clicked level
-    const level = symbolLevels.find(l => l.id === levelId);
-    if (level) {
-      level.selected = true;
-      selectedLine = { type: 'level', data: level };
-      log(`📏 Selected level at ${level.price.toFixed(2)}`);
-    }
-    
-    saveLevelsForSymbol(currentSymbol, currentTimeframe, symbolLevels);
-    updateLevelsDisplay();
-    drawLevelsOnChart();
-  }
-
-  function selectTrendline(trendlineId) {
-    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-    
-    // Clear all selections first
-    symbolTrendlines.forEach(t => t.selected = false);
-    
-    // Select the clicked trendline
-    const trendline = symbolTrendlines.find(t => t.id === trendlineId);
-    if (trendline) {
-      trendline.selected = true;
-      selectedLine = { type: 'trendline', data: trendline };
-      log(`📐 Selected trendline from ${new Date(trendline.startTime * 1000).toISOString().slice(0, 10)}`);
-    }
-    
-    saveTrendlinesForSymbol(currentSymbol, currentTimeframe, symbolTrendlines);
-    updateTrendlinesDisplay();
-    drawTrendlinesOnChart();
-  }
-
-  function removeLevel(levelId) {
-    const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
-    const filtered = symbolLevels.filter(l => l.id !== levelId);
-    saveLevelsForSymbol(currentSymbol, currentTimeframe, filtered);
-    
-    // Clear selection if deleted level was selected
-    if (selectedLine && selectedLine.type === 'level' && selectedLine.data.id === levelId) {
-      selectedLine = null;
-    }
-    
-    updateLevelsDisplay();
-    drawLevelsOnChart();
-  }
-
-  function clearAllLevels() {
-    saveLevelsForSymbol(currentSymbol, currentTimeframe, []);
-    updateLevelsDisplay();
-    drawLevelsOnChart();
-    evaluateCurrentSignals(); // Update signals when all levels cleared
-  }
-
-  function updateLevelsDisplay() {
-    const container = $('#levels');
-    if (!container) return;
-    container.innerHTML = '';
-    
-    const symbolLevels = getLevelsForSymbol(currentSymbol, currentTimeframe);
-    symbolLevels.forEach(level => {
-      const row = document.createElement('div');
-      row.className = `row level-item ${level.selected ? 'selected' : ''}`;
-      row.style.cursor = 'pointer';
-      
-      // Main content - clickable for selection
-      const content = document.createElement('span');
-      content.className = 'level-content';
-      content.innerHTML = `
-        <span class="level-price">${level.price.toFixed(2)}</span>
-        <span class="level-color" style="background-color: ${level.color || '#60a5fa'}"></span>
-      `;
-      
-      // Click to select level
-      content.addEventListener('click', (e) => {
-        e.stopPropagation();
-        selectLevel(level.id);
-      });
-      
-      // Delete button
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'kill';
-      deleteBtn.textContent = '✕';
-      deleteBtn.title = 'Delete level';
-      deleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        removeLevel(level.id);
-      });
-      
-      row.appendChild(content);
-      row.appendChild(deleteBtn);
-      container.appendChild(row);
-    });
-  }
-
-  function updateTrendlinesDisplay() {
-    const container = $('#trends');
-    if (!container) return;
-    container.innerHTML = '';
-    
-    const symbolTrendlines = getTrendlinesForSymbol(currentSymbol, currentTimeframe);
-    symbolTrendlines.forEach(trendline => {
-      const row = document.createElement('div');
-      row.className = `row trendline-item ${trendline.selected ? 'selected' : ''}`;
-      row.style.cursor = 'pointer';
-      
-      // Main content - clickable for selection
-      const content = document.createElement('span');
-      content.className = 'trendline-content';
-      
-      const startDate = new Date(trendline.startTime * 1000).toISOString().slice(0, 10);
-      const endDate = new Date(trendline.endTime * 1000).toISOString().slice(0, 10);
-      const priceRange = `${trendline.startPrice.toFixed(2)} → ${trendline.endPrice.toFixed(2)}`;
-      
-      content.innerHTML = `
-        <div class="trendline-dates">${startDate} → ${endDate}</div>
-        <div class="trendline-prices">${priceRange}</div>
-        <span class="trendline-color" style="background-color: ${trendline.color || '#22d3ee'}"></span>
-      `;
-      
-      // Click to select trendline
-      content.addEventListener('click', (e) => {
-        e.stopPropagation();
-        selectTrendline(trendline.id);
-      });
-      
-      // Delete button
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'kill';
-      deleteBtn.textContent = '✕';
-      deleteBtn.title = 'Delete trendline';
-      deleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        removeTrendline(trendline.id);
-      });
-      
-      row.appendChild(content);
-      row.appendChild(deleteBtn);
-      container.appendChild(row);
-    });
-  }
+  // Old LineSeries-based drawing functions removed - using canvas overlay system
 
   // Check if a point is within the visible TIME range (simplified approach)
   function isTimeInVisibleRange(time) {
@@ -5076,177 +4551,11 @@
     return { ...trendline, isCapped: false };
   }
 
-  function drawTrendlinesOnChart() {
-    const symbolTrendlines = (getTrendlinesForSymbol(currentSymbol, currentTimeframe) || [])
-      .filter(t =>
-        t && t.id != null &&
-        Number.isFinite(t.startTime) && Number.isFinite(t.endTime) &&
-        Number.isFinite(t.startPrice) && Number.isFinite(t.endPrice)
-      );
-
-    // Remove deleted trendlines
-    for (const [id, rec] of trendSeriesById.entries()) {
-      if (!symbolTrendlines.find(t => t.id === id)) {
-        try { 
-          chart.removeSeries(rec.series); 
-        } catch (e) {
-          console.warn('[EOD] Failed to remove trendline series:', e);
-        }
-        trendSeriesById.delete(id);
-      }
-    }
-
-    // Add or update trendlines
-    for (const t of symbolTrendlines) {
-      const existing = trendSeriesById.get(t.id);
-      const lineData = [
-        { time: t.startTime, value: t.startPrice },
-        { time: t.endTime, value: t.endPrice }
-      ];
-
-      if (!existing) {
-        // Create new LineSeries for this trendline
-        const series = chart.addLineSeries({
-          color: t.selected ? '#22d3ee' : (t.color || '#f59e0b'),
-          lineWidth: t.selected ? 3 : 2,
-          lineStyle: 0,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false
-        });
-        series.setData(lineData);
-        trendSeriesById.set(t.id, { series, data: t });
-      } else {
-        // Update existing series if data or style changed
-        const changed = 
-          existing.data.startTime !== t.startTime ||
-          existing.data.startPrice !== t.startPrice ||
-          existing.data.endTime !== t.endTime ||
-          existing.data.endPrice !== t.endPrice ||
-          existing.data.selected !== t.selected ||
-          existing.data.color !== t.color;
-        
-        if (changed) {
-          // Remove and recreate (simpler than updating options)
-          try { 
-            chart.removeSeries(existing.series); 
-          } catch (e) {
-            console.warn('[EOD] Failed to remove trendline for update:', e);
-          }
-          const series = chart.addLineSeries({
-            color: t.selected ? '#22d3ee' : (t.color || '#f59e0b'),
-            lineWidth: t.selected ? 3 : 2,
-            lineStyle: 0,
-            priceLineVisible: false,
-            lastValueVisible: false,
-            crosshairMarkerVisible: false
-          });
-          series.setData(lineData);
-          trendSeriesById.set(t.id, { series, data: t });
-        } else {
-          existing.data = t;
-        }
-      }
-    }
-
-    currentTrendlines = symbolTrendlines;
-  }
-
-  function drawLevelsOnChart() {
-    const symbolLevels = (getLevelsForSymbol(currentSymbol, currentTimeframe) || [])
-      .filter(L => L && L.id != null && Number.isFinite(L.price) && L.price > 0);
-
-    // remove deleted
-    for (const [id, rec] of levelLineById.entries()) {
-      if (!symbolLevels.find(L => L.id === id)) {
-        try { candleSeries.removePriceLine(rec.line); } catch {}
-        levelLineById.delete(id);
-      }
-    }
-
-    // upsert
-    for (const L of symbolLevels) {
-      const existing = levelLineById.get(L.id);
-      const opts = {
-        price: L.price,
-        color: L.selected ? '#22d3ee' : (L.color || '#60a5fa'),
-        lineWidth: L.selected ? 5 : 2,
-        lineStyle: 0,
-        axisLabelVisible: true,
-        title: `Level ${(+L.price).toFixed(2)}`
-      };
-
-      if (!existing) {
-        const line = candleSeries.createPriceLine(opts);
-        levelLineById.set(L.id, { line, data: L });
-      } else {
-        // recreate only if price OR style changed
-        const changed = existing.data.price !== L.price ||
-                        existing.data.selected !== L.selected ||
-                        existing.data.color !== L.color;
-        if (changed) {
-          try { candleSeries.removePriceLine(existing.line); } catch {}
-          const line = candleSeries.createPriceLine(opts);
-          levelLineById.set(L.id, { line, data: L });
-        } else {
-          existing.data = L;
-        }
-      }
-    }
-
-    currentLevels = [...levelLineById.values()].map(r => r.line);
-  }
+  // Old LineSeries drawing functions removed - using canvas overlay system
 
   // ---- Chart Interaction
   
-  function setupChartInteraction() {
-    // Clean drawing system using native Lightweight Charts click API
-    chart.subscribeClick(param => {
-      if (param.point) {
-        const price = candleSeries.coordinateToPrice(param.point.y);
-        const time = chart.timeScale().coordinateToTime(param.point.x);
-        
-        // Validate coordinates
-        if (price !== null && !isNaN(price) && isFinite(price) && 
-            time !== null && time !== undefined && isFinite(time)) {
-          
-          // Handle drawing modes
-          if (unifiedDragState.drawingMode && unifiedDragState.drawingTool === 'level') {
-            addLevel(price);
-            console.log(`[EOD] ✅ Level added at ${price.toFixed(2)}`);
-            // Auto-disable drawing mode after completing level
-            unifiedDragState.drawingMode = false;
-            $('#level-tool').classList.remove('active');
-            document.body.classList.remove('drawing-mode');
-          } else if (unifiedDragState.drawingMode && unifiedDragState.drawingTool === 'trendline') {
-            if (!unifiedDragState.trendlineStart) {
-              // First click: set start point
-              unifiedDragState.trendlineStart = { time, price };
-              console.log('[EOD] ✅ Trendline started - click second point');
-            } else {
-              // Second click: complete trendline
-              addTrendline(
-                unifiedDragState.trendlineStart.time, 
-                unifiedDragState.trendlineStart.price, 
-                time, 
-                price
-              );
-              console.log('[EOD] ✅ Trendline added');
-              // Auto-disable drawing mode after completing trendline
-              unifiedDragState.drawingMode = false;
-              unifiedDragState.trendlineStart = null;
-              $('#trendline-tool').classList.remove('active');
-              document.body.classList.remove('drawing-mode');
-            }
-          }
-        } else {
-          console.log('[EOD] ⚠️ Invalid coordinates for drawing - price:', price, 'time:', time);
-        }
-      }
-    });
-
-    console.log('[EOD] ✅ Chart interaction setup complete - using native click API');
-  }
+  // Old LineSeries chart interaction removed - using canvas overlay system
 
   // ================================================
   // CLEAN CANVAS OVERLAY DRAWING SYSTEM
@@ -6206,87 +5515,7 @@
     loadSymbol(currentSymbol); // refresh chart
   });
 
-  // ===== OVERLAY DRAWING TOOL BUTTONS =====
-  $('#level-tool').addEventListener('click', () => {
-    const canvas = document.getElementById('drawing-overlay');
-    if (unifiedDragState.drawingTool === 'level' && unifiedDragState.drawingMode) {
-      // Turn off drawing mode
-      unifiedDragState.drawingMode = false;
-      $('#level-tool').classList.remove('active');
-      document.body.classList.remove('drawing-mode');
-      if (canvas) canvas.style.pointerEvents = 'none'; // Restore chart interaction
-      log('Drawing mode off');
-    } else {
-      // Switch to level tool
-      unifiedDragState.drawingTool = 'level';
-      unifiedDragState.drawingMode = true;
-      unifiedDragState.trendlineStart = null;
-      $('#level-tool').classList.add('active');
-      $('#trendline-tool').classList.remove('active');
-      document.body.classList.add('drawing-mode');
-      if (canvas) canvas.style.pointerEvents = 'none'; // Level uses chart click, not overlay
-      log('Click chart to add level');
-    }
-  });
-
-  $('#trendline-tool').addEventListener('click', () => {
-    const canvas = document.getElementById('drawing-overlay');
-    if (unifiedDragState.drawingTool === 'trendline' && unifiedDragState.drawingMode) {
-      // Turn off drawing mode
-      unifiedDragState.drawingMode = false;
-      unifiedDragState.trendlineStart = null;
-      $('#trendline-tool').classList.remove('active');
-      document.body.classList.remove('drawing-mode');
-      if (canvas) canvas.style.pointerEvents = 'none'; // Restore chart interaction
-      log('Drawing mode off');
-    } else {
-      // Switch to trendline tool
-      unifiedDragState.drawingTool = 'trendline';
-      unifiedDragState.drawingMode = true;
-      if (canvas) canvas.style.pointerEvents = 'auto'; // Enable overlay for trendline clicks
-      unifiedDragState.trendlineStart = null;
-      $('#trendline-tool').classList.add('active');
-      $('#level-tool').classList.remove('active');
-      document.body.classList.add('drawing-mode');
-      log('Click chart to place first point of trendline');
-    }
-  });
-
-  $('#clear-all').addEventListener('click', () => {
-    if (confirm('Clear all levels and trendlines for ' + currentSymbol + '?')) {
-      clearAllLevels();
-      clearAllTrendlines();
-      
-      // Also clear overlay drawings
-      const drawings = getDrawingsForSymbol(currentSymbol, currentTimeframe);
-      drawings.levels = [];
-      drawings.trendlines = [];
-      saveDrawingsForSymbol(currentSymbol, currentTimeframe, drawings);
-      renderOverlay();
-      
-      log('All levels, trendlines, and overlay drawings cleared');
-    }
-  });
-
-  // Color picker and delete button event listeners
-  document.getElementById('delete-line').addEventListener('click', deleteSelectedLine);
-  document.querySelectorAll('.color-option').forEach(opt => {
-    opt.addEventListener('click', () => {
-      if (!selectedLine) return;
-      const color = opt.dataset.color;
-      selectedLine.data.color = color;
-      if (selectedLine.type === 'trendline') { 
-        saveTrendlines(); 
-        drawTrendlinesOnChart(); 
-      } else { 
-        saveLevels(); 
-        drawLevelsOnChart(); 
-      }
-      // Keep selection visible after redraw
-      selectLine(selectedLine);
-      log(`Changed line color to ${color}`);
-    });
-  });
+  // Old LineSeries button handlers removed - using new canvas overlay buttons
 
   // Enhanced timeframe buttons with full multi-timeframe support
   $$('.tf.btn-toggle').forEach(btn => {
@@ -6311,28 +5540,7 @@
     });
   });
 
-  // ---- Preview functions for trendline drawing
-  function enableTrendlinePreview() {
-    if (!unifiedDragState.trendlineStart) return;
-    
-    previewTrendline = chart.addLineSeries({
-      color: '#94a3b8', // Gray preview color
-      lineWidth: 1,
-      lineStyle: 2, // Dashed line style for preview
-      priceLineVisible: false,
-      lastValueVisible: false
-    });
-    console.log('[EOD] ✅ Trendline preview enabled');
-  }
-
-  function updateTrendlinePreview(endTime, endPrice) {
-    if (previewTrendline && unifiedDragState.trendlineStart) {
-      previewTrendline.setData([
-        { time: unifiedDragState.trendlineStart.time, value: unifiedDragState.trendlineStart.price },
-        { time: endTime, value: endPrice }
-      ]);
-    }
-  }
+  // Old LineSeries preview functions removed - canvas overlay system handles previews
 
   function disableTrendlinePreview() {
     // Clear throttle timer to prevent memory leaks
