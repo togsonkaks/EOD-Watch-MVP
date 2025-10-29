@@ -75,17 +75,20 @@ A comprehensive multi-symbol stock watchlist platform with advanced drawing tool
 
 **Current Status**
 - ✅ All drawing tools functional and tested
-- ✅ Interactive features working (select, drag, delete, context menus)
+- ✅ Interactive features FULLY WORKING: click-to-select, drag handles, extend lines
+- ✅ Visual feedback: Selected lines show blue color with circular handles at endpoints
+- ✅ Drag functionality: Click and drag handle endpoints to extend/move lines
 - ✅ Alert system ready for demo
 - ✅ No coordinate conversion bugs or crashes
-- ✅ Ready for stakeholder demo
+- ✅ **READY FOR STAKEHOLDER DEMO**
 
-**Ready to Demo**
-1. Click **"+ Level"** → click chart → horizontal line appears
-2. Click **"+ Trend (2-click)"** → click twice → trendline connects points
-3. Right-click any line → context menu with alerts/settings/delete
-4. Click and drag trendline endpoints to reposition
-5. All drawings persist across page reloads and symbol changes
+**How to Use**
+1. **Draw a Trendline**: Click "+ Trend (2-click)" → click two points on chart → line appears
+2. **Draw a Level**: Click "+ Level" → click on chart → horizontal line appears
+3. **Select a Line**: Click on any existing line → it turns blue and shows circular handles
+4. **Extend/Move Line**: Click and drag the circular handle at either endpoint → line extends/moves
+5. **Deselect**: Click on empty space on chart
+6. All drawings save automatically and persist across symbol changes/page reloads
 
 ## Recent Changes (2025-09-21)
 
