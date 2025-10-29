@@ -4700,14 +4700,35 @@
         }
       }
       
-      // Check if clicking on a trendline body (for selection)
+      // Check if clicking on a trendline body (for selection or moving)
       for (let i = 0; i < drawnLines.length; i++) {
         const line = drawnLines[i];
         if (isClickOnTrendline(x, y, line)) {
-          selectedLine = i;
-          console.log('[DRAW] ✅ Selected line', i);
-          redrawAllLines();
-          return;
+          if (selectedLine === i && line.type === 'trendline') {
+            // Already selected - start moving the entire line
+            const currentTime = chart.timeScale().coordinateToTime(x);
+            const currentPrice = candleSeries.coordinateToPrice(y);
+            if (currentTime && currentPrice) {
+              dragState = { 
+                lineIndex: i, 
+                handleType: 'move',
+                startMouseTime: currentTime,
+                startMousePrice: currentPrice,
+                lineStartTime: line.aTime,
+                lineStartPrice: line.aPrice,
+                lineEndTime: line.bTime,
+                lineEndPrice: line.bPrice
+              };
+              console.log('[DRAW] 🚚 Started moving entire line', i);
+              return;
+            }
+          } else {
+            // Not selected yet - just select it
+            selectedLine = i;
+            console.log('[DRAW] ✅ Selected line', i);
+            redrawAllLines();
+            return;
+          }
         }
       }
       
@@ -4789,13 +4810,24 @@
         
         if (newTime !== null && newTime !== undefined && newPrice !== null && newPrice !== undefined &&
             isFinite(newTime) && isFinite(newPrice)) {
-          // Update the appropriate endpoint
+          
           if (dragState.handleType === 'start') {
+            // Dragging start endpoint
             line.aTime = newTime;
             line.aPrice = newPrice;
           } else if (dragState.handleType === 'end') {
+            // Dragging end endpoint
             line.bTime = newTime;
             line.bPrice = newPrice;
+          } else if (dragState.handleType === 'move') {
+            // Moving entire line - calculate delta and apply to both points
+            const deltaTime = newTime - dragState.startMouseTime;
+            const deltaPrice = newPrice - dragState.startMousePrice;
+            
+            line.aTime = dragState.lineStartTime + deltaTime;
+            line.aPrice = dragState.lineStartPrice + deltaPrice;
+            line.bTime = dragState.lineEndTime + deltaTime;
+            line.bPrice = dragState.lineEndPrice + deltaPrice;
           }
           redrawAllLines();
         }
