@@ -2619,6 +2619,7 @@
   
   // Set up chart events now that chart is fully initialized
   setupChartEventSynchronization();
+  setupChartInteraction();
   
   // Force resize to ensure proper rendering
   setTimeout(() => {
@@ -5177,101 +5178,52 @@
   // ---- Chart Interaction
   
   function setupChartInteraction() {
-    // OLD DRAWING SYSTEM - DISABLED FOR OVERLAY SYSTEM  
-    /* chart.subscribeClick(param => {
+    // Clean drawing system using native Lightweight Charts click API
+    chart.subscribeClick(param => {
       if (param.point) {
         const price = candleSeries.coordinateToPrice(param.point.y);
         const time = chart.timeScale().coordinateToTime(param.point.x);
         
-        // CRITICAL FIX: Stricter validation to prevent chart crashes
+        // Validate coordinates
         if (price !== null && !isNaN(price) && isFinite(price) && 
             time !== null && time !== undefined && isFinite(time)) {
-          // Check if clicking on existing line for alert setup (when not in drawing mode)
-          if (!unifiedDragState.drawingMode) {
-            const clickedLine = findLineNearClick(param.point.x, param.point.y);
-            if (clickedLine) {
-              // Select line for editing
-              selectLine(clickedLine);
-              log(`Selected ${clickedLine.type} line for editing`);
-              return;
-            } else {
-              // Clicked on empty space - deselect current line
-              if (selectedLine) {
-                deselectLine();
-                log('Line deselected');
-                return;
-              }
-            }
-          }
           
           // Handle drawing modes
           if (unifiedDragState.drawingMode && unifiedDragState.drawingTool === 'level') {
             addLevel(price);
-            log(`Level added at ${price.toFixed(2)}`);
+            console.log(`[EOD] ✅ Level added at ${price.toFixed(2)}`);
             // Auto-disable drawing mode after completing level
             unifiedDragState.drawingMode = false;
             $('#level-tool').classList.remove('active');
             document.body.classList.remove('drawing-mode');
-            console.log('[EOD] ✅ Drawing mode disabled after level completion - drawingMode now:', unifiedDragState.drawingMode);
           } else if (unifiedDragState.drawingMode && unifiedDragState.drawingTool === 'trendline') {
-            if (!trendlineStart) {
+            if (!unifiedDragState.trendlineStart) {
               // First click: set start point
-              trendlineStart = { time, price };
-              enableTrendlinePreview();
-              log('Trendline started. Click second point to finish.');
+              unifiedDragState.trendlineStart = { time, price };
+              console.log('[EOD] ✅ Trendline started - click second point');
             } else {
               // Second click: complete trendline
-              disableTrendlinePreview();
-              addTrendline(trendlineStart.time, trendlineStart.price, time, price);
-              log(`Trendline added from ${trendlineStart.price.toFixed(2)} to ${price.toFixed(2)}`);
+              addTrendline(
+                unifiedDragState.trendlineStart.time, 
+                unifiedDragState.trendlineStart.price, 
+                time, 
+                price
+              );
+              console.log('[EOD] ✅ Trendline added');
               // Auto-disable drawing mode after completing trendline
               unifiedDragState.drawingMode = false;
+              unifiedDragState.trendlineStart = null;
               $('#trendline-tool').classList.remove('active');
               document.body.classList.remove('drawing-mode');
-              trendlineStart = null;
-              console.log('[EOD] ✅ Drawing mode disabled after trendline completion - drawingMode now:', unifiedDragState.drawingMode);
             }
           }
         } else {
-          // Log invalid coordinates without causing errors
           console.log('[EOD] ⚠️ Invalid coordinates for drawing - price:', price, 'time:', time);
         }
       }
-    }); */
-
-    // ==== POINTER EVENT LISTENERS - RE-ENABLED ====
-    let chartContainer = document.getElementById('chart');
-    chartContainer.addEventListener('pointerdown', onPointerDown);
-    chartContainer.addEventListener('pointermove', onPointerMove, { passive: false });
-    chartContainer.addEventListener('pointerup', onPointerUp);
-    chartContainer.addEventListener('pointercancel', onPointerUp);
-    chartContainer.addEventListener('contextmenu', onContextMenu);
-
-    // Keep mousemove only for trendline preview (non-performance critical)
-    chartContainer.addEventListener('mousemove', (event) => {
-      if (unifiedDragState.drawingMode && unifiedDragState.drawingTool === 'trendline' && unifiedDragState.trendlineStart && previewTrendline) {
-        // Throttle preview updates for better performance (max 60fps)
-        if (previewUpdateThrottle) {
-          clearTimeout(previewUpdateThrottle);
-        }
-        previewUpdateThrottle = setTimeout(() => {
-          const rect = chartContainer.getBoundingClientRect();
-          const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-          const price = candleSeries.coordinateToPrice(point.y);
-          const time = chart.timeScale().coordinateToTime(point.x);
-          
-          if (price !== null && !isNaN(price) && isFinite(price) && 
-              time !== null && time !== undefined && isFinite(time)) {
-            updateTrendlinePreview(time, price);
-          }
-        }, 16); // ~60fps throttling
-      }
-      
-      // OLD DRAG HANDLERS REMOVED - Now handled by optimized pointer events
     });
-    
-    // OLD MOUSEDOWN HANDLER REMOVED - Now handled by optimized pointer events
-    // OLD MOUSEUP HANDLER REMOVED - Now handled by optimized pointer events
+
+    console.log('[EOD] ✅ Chart interaction setup complete - using native click API');
   }
 
   // Check if click is near a trendline endpoint for resizing
@@ -6178,7 +6130,6 @@
   updateIndicatorToggles();
   updateLevelsDisplay();
   updateTrendlinesDisplay();
-  setupChartInteraction();
   loadSymbol(currentSymbol);
 
   // health check with status indicator
