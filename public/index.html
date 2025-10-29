@@ -4583,10 +4583,6 @@
       return;
     }
     
-    // Load existing trendlines and levels
-    loadTrendlines();
-    loadLevels();
-    
     // Setup event listeners on chart container
     chartContainer.addEventListener('mousedown', onChartMouseDown);
     chartContainer.addEventListener('mousemove', onChartMouseMove);
@@ -4793,8 +4789,15 @@
     const y = e.clientY - rect.top;
     
     try {
-      const time = chart.timeScale().coordinateToTime(x);
+      let time = chart.timeScale().coordinateToTime(x);
       const price = candleSeries.coordinateToPrice(y);
+      
+      // Convert BusinessDay to timestamp if needed
+      if (time && typeof time === 'object' && 'year' in time) {
+        // It's a BusinessDay object, convert to UTC timestamp
+        time = new Date(time.year, time.month - 1, time.day).getTime() / 1000;
+      }
+      
       return { x, y, time, price };
     } catch (error) {
       return { x, y, time: null, price: null };
