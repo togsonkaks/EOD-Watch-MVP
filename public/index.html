@@ -4911,6 +4911,7 @@
       }
       
       // Check distance to start point
+      console.log("[DRAW] Handle hit test - start dist:", startDistance.toFixed(2), "end dist:", endDistance.toFixed(2), "tolerance:", tolerance);
       const startDistance = Math.sqrt(Math.pow(clickX - startX, 2) + Math.pow(clickY - startY, 2));
       if (startDistance <= tolerance) {
         return 'start';
