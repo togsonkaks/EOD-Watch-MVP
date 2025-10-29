@@ -4683,7 +4683,14 @@
       for (let i = 0; i < drawnLines.length; i++) {
         const line = drawnLines[i];
         if (line.type === 'trendline') {
-          const handleType = checkEndpointHit(x, y, line);
+          // Convert line format for checkEndpointHit
+          const trendlineData = {
+            startTime: line.aTime,
+            startPrice: line.aPrice,
+            endTime: line.bTime,
+            endPrice: line.bPrice
+          };
+          const handleType = checkEndpointHit(x, y, trendlineData);
           if (handleType) {
             // Start dragging a handle
             dragState = { lineIndex: i, handleType: handleType };
