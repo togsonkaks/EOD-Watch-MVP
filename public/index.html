@@ -398,8 +398,12 @@
       position: absolute;
       top: 0;
       left: 0;
-      pointer-events: all; /* Always accept clicks for selection and dragging */
+      pointer-events: none; /* Default: allow chart pan/zoom */
       z-index: 10;
+    }
+    
+    #drawing-canvas.interactive {
+      pointer-events: all; /* Enable when drawing or line selected */
     }
     
     
@@ -4601,6 +4605,18 @@
     drawingCanvas.width = container.clientWidth;
     drawingCanvas.height = container.clientHeight;
     redrawAllLines();
+  
+  function updateCanvasInteractivity() {
+    if (!drawingCanvas) return;
+    
+    // Enable pointer-events only when interacting with drawings
+    // This allows chart pan/zoom to work when not using drawing tools
+    if (drawingMode !== null || selectedLine !== null || dragState !== null) {
+      drawingCanvas.classList.add('interactive');
+    } else {
+      drawingCanvas.classList.remove('interactive');
+    }
+  }
   }
   
   function redrawAllLines() {
@@ -4696,6 +4712,7 @@
             dragState = { lineIndex: i, handleType: handleType };
             console.log('[DRAW] 🎯 Started dragging', handleType, 'handle of line', i);
             return;
+            updateCanvasInteractivity();
           }
         }
       }
@@ -4721,12 +4738,14 @@
               };
               console.log('[DRAW] 🚚 Started moving entire line', i);
               return;
+              updateCanvasInteractivity();
             }
           } else {
             // Not selected yet - just select it
             selectedLine = i;
             console.log('[DRAW] ✅ Selected line', i);
             redrawAllLines();
+            updateCanvasInteractivity();
             return;
           }
         }
@@ -4738,6 +4757,7 @@
         console.log('[DRAW] Deselected line');
         redrawAllLines();
       }
+        updateCanvasInteractivity();
       return;
     }
     
@@ -4757,6 +4777,7 @@
         saveDrawings();
         redrawAllLines();
         drawingMode = null; // Auto-disable
+        updateCanvasInteractivity();
         document.body.classList.remove('drawing-mode');
         drawingCanvas.classList.remove('drawing-active');
         document.getElementById('toolLevel').classList.remove('active');
@@ -4788,6 +4809,7 @@
           currentDrawing = null;
           drawingMode = null; // Auto-disable
           document.body.classList.remove('drawing-mode');
+          updateCanvasInteractivity();
           drawingCanvas.classList.remove('drawing-active');
           document.getElementById('toolTrend').classList.remove('active');
           console.log('[DRAW] ✅ Trendline added');
@@ -4875,6 +4897,7 @@
       saveDrawings();
       dragState = null;
       redrawAllLines();
+      updateCanvasInteractivity();
     }
   }
   
@@ -6343,6 +6366,7 @@
       document.body.classList.remove('drawing-mode');
       if (drawingCanvas) drawingCanvas.classList.remove('drawing-active');
       console.log('[DRAW] Level tool disabled');
+      updateCanvasInteractivity();
     } else {
       // Turn on level tool, turn off trendline
       drawingMode = 'level';
@@ -6352,6 +6376,7 @@
       document.body.classList.add('drawing-mode');
       if (drawingCanvas) drawingCanvas.classList.add('drawing-active');
       console.log('[DRAW] Level tool enabled - click on chart to add level');
+      updateCanvasInteractivity();
     }
   };
   
@@ -6362,6 +6387,7 @@
       currentDrawing = null;
       document.getElementById('toolTrend').classList.remove('active');
       document.body.classList.remove('drawing-mode');
+      updateCanvasInteractivity();
       if (drawingCanvas) drawingCanvas.classList.remove('drawing-active');
       console.log('[DRAW] Trendline tool disabled');
     } else {
@@ -6371,6 +6397,7 @@
       document.getElementById('toolTrend').classList.add('active');
       document.getElementById('toolLevel').classList.remove('active');
       document.body.classList.add('drawing-mode');
+      updateCanvasInteractivity();
       if (drawingCanvas) drawingCanvas.classList.add('drawing-active');
       console.log('[DRAW] Trendline tool enabled - click twice on chart to draw trendline');
     }
