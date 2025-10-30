@@ -4808,26 +4808,49 @@
         const newTime = chart.timeScale().coordinateToTime(x);
         const newPrice = candleSeries.coordinateToPrice(y);
         
+        // CRITICAL: Only update if ALL coordinates are valid to prevent line corruption
         if (newTime !== null && newTime !== undefined && newPrice !== null && newPrice !== undefined &&
-            isFinite(newTime) && isFinite(newPrice)) {
+            isFinite(newTime) && isFinite(newPrice) && newTime > 0 && newPrice > 0) {
           
           if (dragState.handleType === 'start') {
-            // Dragging start endpoint
-            line.aTime = newTime;
-            line.aPrice = newPrice;
+            // Dragging start endpoint - validate result
+            const testEndX = chart.timeScale().timeToCoordinate(line.bTime);
+            const testEndY = candleSeries.priceToCoordinate(line.bPrice);
+            if (testEndX !== null && testEndY !== null) {
+              line.aTime = newTime;
+              line.aPrice = newPrice;
+            }
           } else if (dragState.handleType === 'end') {
-            // Dragging end endpoint
-            line.bTime = newTime;
-            line.bPrice = newPrice;
+            // Dragging end endpoint - validate result
+            const testStartX = chart.timeScale().timeToCoordinate(line.aTime);
+            const testStartY = candleSeries.priceToCoordinate(line.aPrice);
+            if (testStartX !== null && testStartY !== null) {
+              line.bTime = newTime;
+              line.bPrice = newPrice;
+            }
           } else if (dragState.handleType === 'move') {
-            // Moving entire line - calculate delta and apply to both points
+            // Moving entire line - calculate new positions
             const deltaTime = newTime - dragState.startMouseTime;
             const deltaPrice = newPrice - dragState.startMousePrice;
             
-            line.aTime = dragState.lineStartTime + deltaTime;
-            line.aPrice = dragState.lineStartPrice + deltaPrice;
-            line.bTime = dragState.lineEndTime + deltaTime;
-            line.bPrice = dragState.lineEndPrice + deltaPrice;
+            const newATime = dragState.lineStartTime + deltaTime;
+            const newAPrice = dragState.lineStartPrice + deltaPrice;
+            const newBTime = dragState.lineEndTime + deltaTime;
+            const newBPrice = dragState.lineEndPrice + deltaPrice;
+            
+            // Validate ALL new coordinates before applying
+            const testAX = chart.timeScale().timeToCoordinate(newATime);
+            const testAY = candleSeries.priceToCoordinate(newAPrice);
+            const testBX = chart.timeScale().timeToCoordinate(newBTime);
+            const testBY = candleSeries.priceToCoordinate(newBPrice);
+            
+            if (testAX !== null && testAY !== null && testBX !== null && testBY !== null &&
+                isFinite(newATime) && isFinite(newAPrice) && isFinite(newBTime) && isFinite(newBPrice)) {
+              line.aTime = newATime;
+              line.aPrice = newAPrice;
+              line.bTime = newBTime;
+              line.bPrice = newBPrice;
+            }
           }
           redrawAllLines();
         }
